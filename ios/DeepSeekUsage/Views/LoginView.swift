@@ -12,13 +12,13 @@ struct LoginView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var webView: WKWebView?
     @State private var isLoading = true
-    @State private var loginState: LoginState = .loading
+    @State private var loginState: WebViewLoginStep = .stepLoading
 
-    enum LoginState {
-        case loading       // WebView 加载中
-        case ready         // 登录页已加载，等待用户输入
-        case success       // 登录成功，正在提取凭据
-        case error(String) // 出错了
+    enum WebViewLoginStep {
+        case stepLoading    // WebView 加载中
+        case stepReady      // 登录页已加载，等待用户输入
+        case stepSuccess    // 登录成功，正在提取凭据
+        case stepError(String) // 出错了
     }
 
     var body: some View {
@@ -27,18 +27,18 @@ struct LoginView: View {
                 Color(hex: "060D17").ignoresSafeArea()
 
                 switch loginState {
-                case .loading:
+                case .stepLoading:
                     ProgressView()
                         .tint(Color(hex: "00C6FF"))
                         .scaleEffect(1.5)
 
-                case .ready, .success:
+                case .stepReady, .stepSuccess:
                     if let webView {
                         WebViewRepresentable(webView: webView)
                             .ignoresSafeArea(edges: .bottom)
                     }
 
-                case .error(let msg):
+                case .stepError(let msg):
                     VStack(spacing: 16) {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 40))
@@ -48,7 +48,7 @@ struct LoginView: View {
                             .foregroundColor(Color(hex: "7B89A0"))
                             .multilineTextAlignment(.center)
                         Button("重试") {
-                            loginState = .loading
+        loginState = .stepLoading
                             setupWebView()
                         }
                         .foregroundColor(Color(hex: "00C6FF"))
@@ -57,7 +57,7 @@ struct LoginView: View {
                 }
 
                 // 登录成功遮罩
-                if case .success = loginState {
+                if case .stepSuccess = loginState {
                     Color(hex: "060D17").opacity(0.85).ignoresSafeArea()
                     VStack(spacing: 24) {
                         ZStack {
@@ -86,7 +86,7 @@ struct LoginView: View {
                         .foregroundColor(Color(hex: "00C6FF"))
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    if loginState == .ready, let webView {
+                    if loginState == .stepReady, let webView {
                         Button {
                             webView.reload()
                         } label: {
@@ -119,7 +119,7 @@ struct LoginView: View {
         }
 
         webView = wv
-        loginState = .loading
+        loginState = .stepLoading
     }
 
     // MARK: - 登录代理
@@ -136,7 +136,7 @@ struct LoginView: View {
             onLoad: { url in
                 let path = url.path.lowercased()
                 if path.contains("/sign_in") {
-                    loginState = .ready
+                    loginState = .stepReady
                 }
             }
         )
@@ -145,7 +145,7 @@ struct LoginView: View {
     // MARK: - 登录成功处理
 
     private func handleLoginSuccess(webView: WKWebView?) {
-        loginState = .success
+        loginState = .stepSuccess
 
         webView?.evaluateJavaScript("JSON.parse(localStorage.getItem('userToken') || '{}').value || ''") { result, error in
             let token: String
@@ -192,7 +192,7 @@ struct LoginView: View {
                 dismiss()
             }
         } catch {
-            loginState = .error("保存登录信息失败：\(error.localizedDescription)")
+            loginState = .stepError("保存登录信息失败：\(error.localizedDescription)")
         }
     }
 }
