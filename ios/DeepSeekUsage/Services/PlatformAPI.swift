@@ -46,13 +46,19 @@ enum PlatformAPI {
             guard let user = decoded.data?.bizData?.user, let token = user.token else {
                 throw PlatformError.serverError(code: http.statusCode, body: "token missing")
             }
-            // 保存 Cookie（URLSession 会自动从 Set-Cookie 获取）
+            // 保存 Cookie：同时写入 Keychain 和 URLSession shared cookie store
             let cookies = HTTPCookie.cookies(
                 withResponseHeaderFields: (http.allHeaderFields as? [String: String]) ?? [:],
                 for: URL(string: baseURL)!
             )
             let cookieStr = cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
-            if !cookieStr.isEmpty { try? KeychainManager.saveCookie(cookieStr) }
+            if !cookieStr.isEmpty {
+                try? KeychainManager.saveCookie(cookieStr)
+                // 同步到 URLSession cookie store，后续请求自动携带
+                for cookie in cookies {
+                    session.configuration.httpCookieStorage?.setCookie(cookie)
+                }
+            }
 
             return LoginResult(
                 token: token,
@@ -117,7 +123,11 @@ enum PlatformAPI {
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "authorization")
-        // URLSession 自动从 httpCookieStorage 读取 cookie 附加
+
+        // 从 Keychain 恢复 cookie（WebView 非持久化 cookie 不会自动同步到 URLSession）
+        if let cookieStr = KeychainManager.loadCookie(), !cookieStr.isEmpty {
+            req.setValue(cookieStr, forHTTPHeaderField: "Cookie")
+        }
 
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw PlatformError.invalidResponse }

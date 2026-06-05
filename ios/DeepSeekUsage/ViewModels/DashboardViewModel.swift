@@ -87,13 +87,21 @@ final class DashboardViewModel: ObservableObject {
         do {
             let data = try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear)
             allAmounts = data.days ?? []
-        } catch { print("amount: \(error)") }
+        } catch {
+            allAmounts = []
+            print("amount: \(error)")
+            if errorMessage == nil { errorMessage = "用量数据加载失败，请检查网络或重新登录" }
+        }
 
         // 费用 (当前月)
         do {
             let data = try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear)
             allCosts = data.days ?? []
-        } catch { print("cost: \(error)") }
+        } catch {
+            allCosts = []
+            print("cost: \(error)")
+            if errorMessage == nil { errorMessage = "费用数据加载失败，请检查网络或重新登录" }
+        }
 
         refreshAvailableMonths()
     }
