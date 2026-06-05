@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 import Charts
 
 /// 仪表盘主页
@@ -10,7 +9,6 @@ import Charts
 /// - 30 天消费趋势图
 struct DashboardView: View {
     @StateObject private var vm = DashboardViewModel()
-    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         NavigationStack {
@@ -39,7 +37,7 @@ struct DashboardView: View {
                         ProgressView()
                     } else {
                         Button {
-                            Task { await vm.loadData(modelContext: modelContext) }
+                            Task { await vm.loadData() }
                         } label: {
                             Image(systemName: "arrow.triangle.2.circlepath")
                         }
@@ -47,7 +45,7 @@ struct DashboardView: View {
                 }
             }
             .refreshable {
-                await vm.loadData(modelContext: modelContext)
+                await vm.loadData()
             }
             .alert("错误", isPresented: .constant(vm.errorMessage != nil)) {
                 Button("确定") { vm.errorMessage = nil }
@@ -56,9 +54,9 @@ struct DashboardView: View {
             }
             .task {
                 if vm.balance == nil {
-                    await vm.loadData(modelContext: modelContext)
+                    await vm.loadData()
                 }
-                vm.calculateStats(modelContext: modelContext)
+                vm.calculateStats()
             }
         }
     }

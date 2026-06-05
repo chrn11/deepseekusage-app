@@ -1,12 +1,10 @@
 import Foundation
-import SwiftData
 import SwiftUI
 
 /// 仪表盘 ViewModel
 ///
-/// 功能：
-/// - 从 Keychain 读取 API Key → 直接调 DeepSeek API
-/// - 余额快照存 SwiftData（本地）
+/// - 从钥匙串读取 API Key → 直接调 DeepSeek API
+/// - 余额快照存本地 JSON（SnapshotStore）
 /// - 通过余额差值推算每日消费
 @MainActor
 final class DashboardViewModel: ObservableObject {
@@ -15,21 +13,19 @@ final class DashboardViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    /// 最近 30 天的用量统计（由余额差值计算）
+    /// 最近 30 天用量（由余额差值计算）
     @Published var dailyStats: [DailyUsageStat] = []
 
-    /// 今日消费
+    /// 今日 / 本周 / 本月消费
     @Published var todaySpend: Double = 0
-
-    /// 本月消费
+    @Published var weekSpend: Double = 0
     @Published var monthSpend: Double = 0
 
-    /// 本周消费
-    @Published var weekSpend: Double = 0
+    private let store = SnapshotStore.shared
 
-    // MARK: - 加载数据
+    // MARK: - 加载
 
-    func loadData(modelContext: ModelContext) async {
+    func loadData() async {
         guard KeychainManager.hasKey else {
             errorMessage = "请先在设置中填入 DeepSeek API Key"
             return
@@ -39,24 +35,21 @@ final class DashboardViewModel: ObservableObject {
         errorMessage = nil
 
         do {
-            // 1. 查余额
             let resp = try await DeepSeekAPI.fetchBalance()
             balance = resp.balanceInfos.first
 
-            // 2. 保存快照到本地
+            // 存快照
             if let info = resp.balanceInfos.first {
-                let snapshot = BalanceSnapshot(
+                store.add(BalanceSnapshot(
+                    timestamp: Date(),
                     totalBalance: info.totalBalanceValue,
                     grantedBalance: info.grantedBalanceValue,
                     toppedUpBalance: info.toppedUpBalanceValue,
                     currency: info.currency
-                )
-                modelContext.insert(snapshot)
-                try modelContext.save()
+                ))
             }
 
-            // 3. 重新计算用量统计
-            calculateStats(modelContext: modelContext)
+            calculateStats()
 
         } catch {
             errorMessage = error.localizedDescription
@@ -65,28 +58,21 @@ final class DashboardViewModel: ObservableObject {
         isLoading = false
     }
 
-    // MARK: - 从本地快照计算消费
+    // MARK: - 计算消费统计
 
-    func calculateStats(modelContext: ModelContext) {
-        let now = Date()
+    func calculateStats() {
+        let snaps = store.snapshots
         let calendar = Calendar.current
+        let now = Date()
 
-        // 取所有快照
-        let descriptor = FetchDescriptor<BalanceSnapshot>(
-            sortBy: [SortDescriptor(\.timestamp, order: .forward)]
-        )
-
-        guard let snapshots = try? modelContext.fetch(descriptor),
-              snapshots.count >= 2 else {
+        guard snaps.count >= 2 else {
             dailyStats = []
-            todaySpend = 0
-            monthSpend = 0
-            weekSpend = 0
+            todaySpend = 0; weekSpend = 0; monthSpend = 0
             return
         }
 
         // 按天分组，每天取最早和最后一次快照
-        let grouped = Dictionary(grouping: snapshots) { $0.dateOnly }
+        let grouped = Dictionary(grouping: snaps) { $0.dateOnly }
             .sorted { $0.key < $1.key }
 
         var stats: [DailyUsageStat] = []
@@ -95,15 +81,15 @@ final class DashboardViewModel: ObservableObject {
 
         for (date, daySnapshots) in grouped {
             guard let first = daySnapshots.first,
-                  let last = daySnapshots.last else { continue }
+                  let last = daySnapshots.last,
+                  first.totalBalance > last.totalBalance else { continue }
 
-            let spend = max(0, first.totalBalance - last.totalBalance)
+            let spend = first.totalBalance - last.totalBalance
 
             stats.append(DailyUsageStat(
                 id: df.string(from: date),
                 date: date,
-                spend: spend,
-                snapshot: last
+                spend: spend
             ))
         }
 
@@ -118,15 +104,13 @@ final class DashboardViewModel: ObservableObject {
         // 本月
         monthSpend = dailyStats
             .filter { calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
-            .map(\.spend)
-            .reduce(0, +)
+            .map(\.spend).reduce(0, +)
 
         // 本周
         let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
         weekSpend = dailyStats
             .filter { $0.date >= weekStart }
-            .map(\.spend)
-            .reduce(0, +)
+            .map(\.spend).reduce(0, +)
     }
 
     // MARK: - 格式化
@@ -135,11 +119,11 @@ final class DashboardViewModel: ObservableObject {
         String(format: "¥%.2f", todaySpend)
     }
 
-    var formattedMonthSpend: String {
-        String(format: "¥%.2f", monthSpend)
-    }
-
     var formattedWeekSpend: String {
         String(format: "¥%.2f", weekSpend)
+    }
+
+    var formattedMonthSpend: String {
+        String(format: "¥%.2f", monthSpend)
     }
 }
