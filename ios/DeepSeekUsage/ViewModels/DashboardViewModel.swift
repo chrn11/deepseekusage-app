@@ -251,9 +251,6 @@ final class DashboardViewModel: ObservableObject {
         }.sorted { $0.date < $1.date }
     }
 
-}
-    }
-
     // MARK: - fmt
 
     var formattedTodaySpend: String  { String(format: "¥%.2f", todaySpend) }

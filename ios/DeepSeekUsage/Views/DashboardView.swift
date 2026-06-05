@@ -226,12 +226,12 @@ struct DashboardView: View {
         let callPill: (String, String, String, Color)? = vm.isLoggedIn
             ? ("调用", "\(vm.monthCalls)次", "arrow.up.message", Color(hex: "00E6A0")) : nil
 
-        let items = callPill.map { pills + [$0] } ?? pills
-        let cols = Array(items.enumerated())
+        var items = pills
+        if let cp = callPill { items.append(cp) }
 
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 10) {
-            ForEach(cols, id: \.offset) { _, item in
-                statPill(item.0, item.1, item.2, item.3)
+            ForEach(0..<items.count, id: \.self) { i in
+                statPill(items[i].0, items[i].1, items[i].2, items[i].3)
             }
         }
     }
