@@ -34,12 +34,6 @@
 
 ## 怎么装
 
-### 下载 IPA
-
-去 [Actions](https://github.com/chrn11/deepseekusage-app/actions) 页面下载最新的 `DeepSeekUsage.ipa`，AirDrop 到 iPhone 即可安装。
-
-### 本地编译
-
 ```bash
 brew install xcodegen
 xcodegen generate --spec project.yml

@@ -2,12 +2,6 @@
 
 ## 安装
 
-### 下载 IPA
-
-从 [GitHub Actions](https://github.com/chrn11/deepseekusage-app/actions) 下载最新构建产物 `DeepSeekUsage.ipa`，AirDrop 到 iPhone 安装。
-
-### Xcode 本地编译
-
 ```bash
 brew install xcodegen
 cd deepseekusage-app/
