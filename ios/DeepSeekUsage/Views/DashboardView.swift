@@ -95,16 +95,16 @@ struct DashboardView: View {
                     colors: [Color(hex: "081830"), Color(hex: "0C2045"), Color(hex: "071226")],
                     startPoint: .topLeading, endPoint: .bottomTrailing))
                 .overlay(
-                    Circle().fill(Color(hex: "00C6FF").opacity(0.15)).frame(width: 180).blur(radius: 60).offset(x: 70, y: 30))
+                    Circle().fill(Color(hex: "00C6FF").opacity(0.2)).frame(width: 180).blur(radius: 60).offset(x: 70, y: 30))
                 .overlay(
-                    Circle().fill(Color(hex: "7C5CFC").opacity(0.1)).frame(width: 120).blur(radius: 50).offset(x: -80, y: -20))
+                    Circle().fill(Color(hex: "7C5CFC").opacity(0.12)).frame(width: 120).blur(radius: 50).offset(x: -80, y: -20))
                 .overlay(
-                    LinearGradient(colors: [.clear, Color(hex: "00C6FF").opacity(0.2), .clear],
+                    LinearGradient(colors: [.clear, Color(hex: "00C6FF").opacity(0.3), .clear],
                                    startPoint: .leading, endPoint: .trailing)
                     .frame(height: 1.5).padding(.horizontal, 20), alignment: .bottom)
 
             RoundedRectangle(cornerRadius: 22)
-                .stroke(LinearGradient(colors: [.white.opacity(0.1), Color(hex: "00C6FF").opacity(0.2)],
+                .stroke(LinearGradient(colors: [.white.opacity(0.15), Color(hex: "00C6FF").opacity(0.3)],
                                        startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
 
             VStack(spacing: 18) {
@@ -146,7 +146,7 @@ struct DashboardView: View {
                 if let b = vm.balance {
                     HStack(spacing: 0) {
                         subRow("充值", b.formattedToppedUp, Color(hex: "00E6A0"))
-                        Divider().frame(height: 28).background(.white.opacity(0.08)).padding(.horizontal, 24)
+                        Divider().frame(height: 28).background(.white.opacity(0.15)).padding(.horizontal, 24)
                         subRow("赠送", b.formattedGranted, Color(hex: "00C6FF"))
                         Spacer()
                     }
@@ -158,7 +158,7 @@ struct DashboardView: View {
 
     private func subRow(_ label: String, _ value: String, _ color: Color) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.system(size: 12, weight: .medium)).foregroundColor(Color(hex: "6A7A92"))
+            Text(label).font(.system(size: 12, weight: .medium)).foregroundColor(Color(hex: "8C9DB5"))
             Text(value).font(.system(size: 18, weight: .semibold, design: .monospaced)).foregroundColor(color)
         }
     }
@@ -223,7 +223,7 @@ struct DashboardView: View {
             Image(systemName: icon).font(.system(size: 14)).foregroundColor(color).frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
                 Text(val).font(.system(size: 16, weight: .bold, design: .monospaced)).foregroundColor(.white).lineLimit(1)
-                Text(title).font(.system(size: 11, weight: .medium)).foregroundColor(Color(hex: "6A7A92"))
+                Text(title).font(.system(size: 11, weight: .medium)).foregroundColor(Color(hex: "8C9DB5"))
             }
             Spacer(minLength: 0)
         }
@@ -240,7 +240,7 @@ struct DashboardView: View {
         HStack(spacing: 8) {
             Button { withAnimation { vm.previousMonth() } } label: {
                 Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(canPrev ? Color(hex: "00C6FF") : Color(hex: "3A4A62"))
+                    .foregroundColor(canPrev ? Color(hex: "00C6FF") : Color(hex: "5A6A82"))
                     .frame(width: 40, height: 40)
             }.disabled(!canPrev)
 
@@ -249,7 +249,7 @@ struct DashboardView: View {
 
             Button { withAnimation { vm.nextMonth() } } label: {
                 Image(systemName: "chevron.right").font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(canNext ? Color(hex: "00C6FF") : Color(hex: "3A4A62"))
+                    .foregroundColor(canNext ? Color(hex: "00C6FF") : Color(hex: "5A6A82"))
                     .frame(width: 40, height: 40)
             }.disabled(!canNext)
         }
@@ -279,7 +279,7 @@ struct DashboardView: View {
                     .overlay {
                         VStack(spacing: 2) {
                             Text("\(vm.modelBreakdown.count)").font(.system(size: 34, weight: .bold)).foregroundColor(.white)
-                            Text("个模型").font(.system(size: 13, weight: .medium)).foregroundColor(Color(hex: "6A7A92"))
+                            Text("个模型").font(.system(size: 13, weight: .medium)).foregroundColor(Color(hex: "8C9DB5"))
                         }
                     }
 
@@ -290,11 +290,11 @@ struct DashboardView: View {
                             Text(m.model).font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
                             Spacer()
                             Text(m.pct).font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundColor(modelColors[i % modelColors.count])
-                            Text("· \(m.formattedTokens)").font(.system(size: 12, design: .monospaced)).foregroundColor(Color(hex: "6A7A92"))
+                            Text("· \(m.formattedTokens)").font(.system(size: 12, design: .monospaced)).foregroundColor(Color(hex: "8C9DB5"))
                         }
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 2).fill(.white.opacity(0.06)).frame(height: 4)
+                                RoundedRectangle(cornerRadius: 2).fill(.white.opacity(0.10)).frame(height: 4)
                                 RoundedRectangle(cornerRadius: 2).fill(modelColors[i % modelColors.count])
                                     .frame(width: geo.size.width * CGFloat(m.fraction), height: 4)
                             }
@@ -338,7 +338,7 @@ struct DashboardView: View {
                     .foregroundStyle(Color(hex: "00C6FF")).lineStyle(StrokeStyle(lineWidth: 2))
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .day, count: 5)) { AxisValueLabel().foregroundStyle(Color(hex: "6A7A92")).font(.system(size: 11)) }
+                AxisMarks(values: .stride(by: .day, count: 5)) { AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11)) }
             }
             .chartYAxis {
                 AxisMarks { AxisGridLine().foregroundStyle(.white.opacity(0.04)) }
@@ -387,7 +387,7 @@ struct DashboardView: View {
                     }
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .day, count: 5)) { AxisValueLabel().foregroundStyle(Color(hex: "6A7A92")).font(.system(size: 11)) }
+                AxisMarks(values: .stride(by: .day, count: 5)) { AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11)) }
             }
             .chartYAxis {
                 AxisMarks { AxisGridLine().foregroundStyle(.white.opacity(0.04)) }
@@ -409,7 +409,7 @@ struct DashboardView: View {
                 Image(systemName: "sparkles").font(.system(size: 18)).foregroundColor(Color(hex: "7C5CFC"))
                 VStack(alignment: .leading, spacing: 3) {
                     Text("登录查看详细用量").font(.system(size: 16, weight: .semibold)).foregroundColor(.white)
-                    Text("Token 明细 · 每日费用 · 模型分布").font(.system(size: 13)).foregroundColor(Color(hex: "6A7A92"))
+                    Text("Token 明细 · 每日费用 · 模型分布").font(.system(size: 13)).foregroundColor(Color(hex: "8C9DB5"))
                 }
                 Spacer()
                 Image(systemName: "chevron.right").font(.system(size: 15, weight: .semibold)).foregroundColor(Color(hex: "00C6FF"))
@@ -432,7 +432,7 @@ struct DashboardView: View {
                 Text(title).font(.system(size: 16, weight: .bold)).foregroundColor(.white)
                 Spacer()
                 if let s = sub {
-                    Text(s).font(.system(size: 12, weight: .medium)).foregroundColor(Color(hex: "6A7A92"))
+                    Text(s).font(.system(size: 12, weight: .medium)).foregroundColor(Color(hex: "8C9DB5"))
                         .padding(.horizontal, 10).padding(.vertical, 3)
                         .background(.white.opacity(0.04)).clipShape(Capsule())
                 }
@@ -440,8 +440,8 @@ struct DashboardView: View {
             .padding(.horizontal, 18).padding(.top, 16).padding(.bottom, 10)
             content().padding(.horizontal, 12).padding(.bottom, 12)
         }
-        .background(RoundedRectangle(cornerRadius: 20).fill(Color(hex: "0A1228").opacity(0.5))
-            .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.06), lineWidth: 1)))
+        .background(RoundedRectangle(cornerRadius: 20).fill(Color(hex: "0A1228").opacity(0.55))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.12), lineWidth: 1)))
     }
 }
 
@@ -455,14 +455,14 @@ struct FlowBlock: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
                 Circle().fill(color).frame(width: 7, height: 7)
-                Text(label).font(.system(size: 12, weight: .medium)).foregroundColor(Color(hex: "6A7A92"))
+                Text(label).font(.system(size: 12, weight: .medium)).foregroundColor(Color(hex: "8C9DB5"))
             }
             Text(value).font(.system(size: 20, weight: .bold, design: .monospaced)).foregroundColor(color)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(color.opacity(0.06))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.12), lineWidth: 1)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(color.opacity(0.08))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.15), lineWidth: 1)))
     }
 }
 
@@ -471,11 +471,11 @@ struct KpiChip: View {
     var body: some View {
         VStack(spacing: 3) {
             Text(value).font(.system(size: 18, weight: .bold, design: .monospaced)).foregroundColor(color)
-            Text(title).font(.system(size: 11, weight: .medium)).foregroundColor(Color(hex: "6A7A92"))
+            Text(title).font(.system(size: 11, weight: .medium)).foregroundColor(Color(hex: "8C9DB5"))
         }
         .frame(maxWidth: .infinity).padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 12).fill(color.opacity(0.06))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.12), lineWidth: 1)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(color.opacity(0.08))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.15), lineWidth: 1)))
     }
 }
 
@@ -509,7 +509,7 @@ struct NeonDonut: View {
             let ring = Path { p in
                 p.addArc(center: c, radius: r + 3, startAngle: .zero, endAngle: .degrees(360), clockwise: false)
             }
-            ctx.stroke(ring, with: .color(.white.opacity(0.06)), lineWidth: 1)
+            ctx.stroke(ring, with: .color(.white.opacity(0.12)), lineWidth: 1)
         }
     }
 }

@@ -72,11 +72,11 @@ struct SettingsView: View {
 
                     Button { isKeyVisible.toggle() } label: {
                         Image(systemName: isKeyVisible ? "eye.slash.fill" : "eye.fill")
-                            .font(.system(size: 15)).foregroundColor(Color(hex: "5A6A82"))
+                            .font(.system(size: 15)).foregroundColor(Color(hex: "6B7D94"))
                     }
                 }
                 .padding(12).background(Color(hex: "0A1228")).clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.06), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.12), lineWidth: 1))
 
                 HStack(spacing: 10) {
                     accentBtn("保存", "square.and.arrow.down.fill", saveKey)
@@ -86,7 +86,7 @@ struct SettingsView: View {
                         .overlay { if isTesting { ProgressView().tint(Color(hex: "00C6FF")) } }
                 }
                 Text("从 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) 获取 · 仅存本机钥匙串")
-                    .font(.system(size: 10)).foregroundColor(Color(hex: "4A5A72")).padding(.top, 2)
+                    .font(.system(size: 10)).foregroundColor(Color(hex: "5C6E82")).padding(.top, 2)
             }
             .padding(14)
         }
@@ -127,7 +127,7 @@ struct SettingsView: View {
                     }
                 }
                 Text("在平台网页内登录 · 支持验证码")
-                    .font(.system(size: 10)).foregroundColor(Color(hex: "4A5A72"))
+                    .font(.system(size: 10)).foregroundColor(Color(hex: "5C6E82"))
             }
             .padding(14)
         }
@@ -153,7 +153,7 @@ struct SettingsView: View {
                     } label: {
                         HStack {
                             Text(mode.rawValue).font(.system(size: 15, weight: .medium))
-                                .foregroundColor(currencyDisplay == mode.rawValue ? .white : Color(hex: "7B89A0"))
+                                .foregroundColor(currencyDisplay == mode.rawValue ? .white : Color(hex: "8C9DB5"))
                             Spacer()
                             if currencyDisplay == mode.rawValue {
                                 Image(systemName: "checkmark.circle.fill").font(.system(size: 18)).foregroundColor(Color(hex: "00C6FF"))
@@ -163,7 +163,7 @@ struct SettingsView: View {
                     }
                 }
                 Text("汇率约 $1 = ¥\(String(format: "%.2f", CurrencyDisplay.usdRate)) · 仅影响本 App 显示")
-                    .font(.system(size: 11)).foregroundColor(Color(hex: "4A5A72"))
+                    .font(.system(size: 11)).foregroundColor(Color(hex: "5C6E82"))
             }
             .padding(14)
         }
@@ -193,7 +193,7 @@ struct SettingsView: View {
                 }
                 .padding(12).background(Color(hex: "0A1228")).clipShape(RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(
-                    alertThreshold > 0 ? Color(hex: "FF6B6B").opacity(0.3) : Color.white.opacity(0.06), lineWidth: 1))
+                    alertThreshold > 0 ? Color(hex: "FF6B6B").opacity(0.3) : Color.white.opacity(0.12), lineWidth: 1))
 
                 if alertThreshold > 0 {
                     HStack {
@@ -232,13 +232,13 @@ struct SettingsView: View {
             secHead("info.circle.fill", "关于", nil)
             VStack(spacing: 8) {
                 aboutRow("版本", "1.0.0")
-                Divider().background(Color.white.opacity(0.04))
+                Divider().background(Color.white.opacity(0.1))
                 aboutRow("构建", "XcodeGen + GitHub Actions")
-                Divider().background(Color.white.opacity(0.04))
+                Divider().background(Color.white.opacity(0.1))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("数据来源").font(.system(size: 13)).foregroundColor(Color(hex: "7B89A0"))
+                    Text("数据来源").font(.system(size: 13)).foregroundColor(Color(hex: "8C9DB5"))
                     Text("余额：api.deepseek.com/user/balance\n用量：platform.deepseek.com 内部接口\n接口地址支持诊断自动更新")
-                        .font(.system(size: 11)).foregroundColor(Color(hex: "4A5A72"))
+                        .font(.system(size: 11)).foregroundColor(Color(hex: "5C6E82"))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -249,9 +249,9 @@ struct SettingsView: View {
 
     private func aboutRow(_ k: String, _ v: String) -> some View {
         HStack {
-            Text(k).font(.system(size: 13)).foregroundColor(Color(hex: "7B89A0"))
+            Text(k).font(.system(size: 13)).foregroundColor(Color(hex: "8C9DB5"))
             Spacer()
-            Text(v).font(.system(size: 13, design: .monospaced)).foregroundColor(Color(hex: "5A6A82"))
+            Text(v).font(.system(size: 13, design: .monospaced)).foregroundColor(Color(hex: "6B7D94"))
         }
     }
 
@@ -264,7 +264,7 @@ struct SettingsView: View {
                 Text(title).font(.system(size: 15, weight: .semibold)).foregroundColor(Color(hex: "E8EDF5"))
             }
             if let s = sub {
-                Text(s).font(.system(size: 11)).foregroundColor(Color(hex: "5A6A82"))
+                Text(s).font(.system(size: 11)).foregroundColor(Color(hex: "6B7D94"))
             }
         }
         .padding([.horizontal, .top], 14).padding(.bottom, 8)
@@ -273,7 +273,7 @@ struct SettingsView: View {
     private var secBg: some View {
         RoundedRectangle(cornerRadius: 18)
             .fill(Color(hex: "0A1228").opacity(0.6))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.06), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12), lineWidth: 1))
     }
 
     private func accentBtn(_ title: String, _ icon: String, _ action: @escaping () -> Void) -> some View {

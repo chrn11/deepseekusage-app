@@ -41,7 +41,7 @@ struct ContentView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 24)
-                .stroke(.white.opacity(0.06), lineWidth: 1)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
         )
         .padding(.horizontal, 40)
         .padding(.bottom, 8)
@@ -62,7 +62,7 @@ struct ContentView: View {
                         .transition(.move(edge: .leading).combined(with: .opacity))
                 }
             }
-            .foregroundColor(selection == index ? Color(hex: "00C6FF") : Color(hex: "5A6A82"))
+            .foregroundColor(selection == index ? Color(hex: "00C6FF") : Color(hex: "7B8DA0"))
             .frame(height: 40)
             .frame(maxWidth: selection == index ? .infinity : 48)
             .background(
