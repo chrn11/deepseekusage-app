@@ -81,7 +81,7 @@ final class DashboardViewModel: ObservableObject {
 
         // 汇总
         do { summary = try await PlatformAPI.fetchUsageSummary() }
-        catch { print("summary: \(error)") }
+        catch { print("[Dashboard] summary 失败: \(error)") }
 
         // 用量 (当前月)
         do {
@@ -89,8 +89,8 @@ final class DashboardViewModel: ObservableObject {
             allAmounts = data.days ?? []
         } catch {
             allAmounts = []
-            print("amount: \(error)")
-            if errorMessage == nil { errorMessage = "用量数据加载失败，请检查网络或重新登录" }
+            print("[Dashboard] amount 失败: \(error)")
+            if errorMessage == nil { errorMessage = "用量数据加载失败：\(error.localizedDescription)" }
         }
 
         // 费用 (当前月)
@@ -99,8 +99,8 @@ final class DashboardViewModel: ObservableObject {
             allCosts = data.days ?? []
         } catch {
             allCosts = []
-            print("cost: \(error)")
-            if errorMessage == nil { errorMessage = "费用数据加载失败，请检查网络或重新登录" }
+            print("[Dashboard] cost 失败: \(error)")
+            if errorMessage == nil { errorMessage = "费用数据加载失败：\(error.localizedDescription)" }
         }
 
         refreshAvailableMonths()
@@ -122,11 +122,11 @@ final class DashboardViewModel: ObservableObject {
         // 切月份需要重新拉数据
         Task {
             isLoading = true
-            do { summary = try await PlatformAPI.fetchUsageSummary() } catch { /* summary 可选，忽略 */ }
+            do { summary = try await PlatformAPI.fetchUsageSummary() } catch { print("[Dashboard] selectMonth summary: \(error)") }
             do { allCosts   = (try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear)).days ?? [] }
-            catch { allCosts = []; errorMessage = "费用数据加载失败" }
+            catch { allCosts = []; errorMessage = "费用数据加载失败：\(error.localizedDescription)" }
             do { allAmounts = (try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear)).days ?? [] }
-            catch { allAmounts = []; errorMessage = "用量数据加载失败" }
+            catch { allAmounts = []; errorMessage = "用量数据加载失败：\(error.localizedDescription)" }
             computeStats()
             isLoading = false
         }

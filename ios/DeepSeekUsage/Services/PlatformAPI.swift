@@ -9,14 +9,15 @@ enum PlatformAPI {
     private static let baseURL = "https://platform.deepseek.com"
     private static let decoder = JSONDecoder()
 
-    /// 共享 URLSession，ephemeral 不持久化 cookie（每次登录后会重新拿）
+    /// 共享 URLSession — ephemeral 配置不持久化 cookie，手动注入避免冲突
     private static let session: URLSession = {
-        let c = URLSessionConfiguration.default
+        let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 15
         c.timeoutIntervalForResource = 30
+        c.httpShouldSetCookies = false
         c.httpAdditionalHeaders = [
             "x-app-version": "1.0.0",
-            "accept": "application/json",
+            "accept": "*/*",
             "accept-language": "zh-CN,zh;q=0.9",
         ]
         return URLSession(configuration: c)
@@ -24,7 +25,7 @@ enum PlatformAPI {
 
     // MARK: - 登录
 
-    /// POST /auth-api/v0/users/login
+    /// POST /auth-api/v0/users/login（保留供 API 方式登录，当前主流程用 WebView）
     static func login(email: String, password: String, deviceId: String) async throws -> LoginResult {
         var req = URLRequest(url: URL(string: "\(baseURL)/auth-api/v0/users/login")!)
         req.httpMethod = "POST"
@@ -46,7 +47,7 @@ enum PlatformAPI {
             guard let user = decoded.data?.bizData?.user, let token = user.token else {
                 throw PlatformError.serverError(code: http.statusCode, body: "token missing")
             }
-            // 保存 Cookie：同时写入 Keychain 和 URLSession shared cookie store
+            // 登录接口返回的 Set-Cookie 备份到 Keychain
             let cookies = HTTPCookie.cookies(
                 withResponseHeaderFields: (http.allHeaderFields as? [String: String]) ?? [:],
                 for: URL(string: baseURL)!
@@ -54,10 +55,6 @@ enum PlatformAPI {
             let cookieStr = cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
             if !cookieStr.isEmpty {
                 try? KeychainManager.saveCookie(cookieStr)
-                // 同步到 URLSession cookie store，后续请求自动携带
-                for cookie in cookies {
-                    session.configuration.httpCookieStorage?.setCookie(cookie)
-                }
             }
 
             return LoginResult(
@@ -79,11 +76,19 @@ enum PlatformAPI {
     /// GET /api/v0/users/get_user_summary
     static func fetchUsageSummary() async throws -> SummaryData {
         let data = try await authedGet("/api/v0/users/get_user_summary")
-        let decoded = try decoder.decode(SummaryResponse.self, from: data)
-        guard let biz = decoded.data?.bizData else {
-            throw PlatformError.invalidResponse
+        do {
+            let decoded = try decoder.decode(SummaryResponse.self, from: data)
+            guard let biz = decoded.data?.bizData else {
+                let body = String(data: data, encoding: .utf8) ?? "(empty)"
+                print("[PlatformAPI] summary: bizData 为 nil，响应体: \(body.prefix(500))")
+                throw PlatformError.invalidResponse
+            }
+            return biz
+        } catch let decodeError as DecodingError {
+            let body = String(data: data, encoding: .utf8) ?? "(无法解码)"
+            print("[PlatformAPI] summary 解码失败: \(decodeError)，响应体: \(body.prefix(500))")
+            throw PlatformError.serverError(code: 200, body: "解码失败: \(decodeError.localizedDescription)")
         }
-        return biz
     }
 
     // MARK: - 每日用量（Token + 请求数）
@@ -91,11 +96,19 @@ enum PlatformAPI {
     /// GET /api/v0/usage/amount?month=6&year=2026
     static func fetchUsageAmount(month: Int, year: Int) async throws -> UsageAmountData {
         let data = try await authedGet("/api/v0/usage/amount?month=\(month)&year=\(year)")
-        let decoded = try decoder.decode(UsageAmountResponse.self, from: data)
-        guard let biz = decoded.data?.bizData else {
-            throw PlatformError.invalidResponse
+        do {
+            let decoded = try decoder.decode(UsageAmountResponse.self, from: data)
+            guard let biz = decoded.data?.bizData else {
+                let body = String(data: data, encoding: .utf8) ?? "(empty)"
+                print("[PlatformAPI] amount: bizData 为 nil，响应体: \(body.prefix(500))")
+                throw PlatformError.invalidResponse
+            }
+            return biz
+        } catch let decodeError as DecodingError {
+            let body = String(data: data, encoding: .utf8) ?? "(无法解码)"
+            print("[PlatformAPI] amount 解码失败: \(decodeError)，响应体: \(body.prefix(500))")
+            throw PlatformError.serverError(code: 200, body: "解码失败: \(decodeError.localizedDescription)")
         }
-        return biz
     }
 
     // MARK: - 每日费用
@@ -103,11 +116,19 @@ enum PlatformAPI {
     /// GET /api/v0/usage/cost?month=6&year=2026
     static func fetchUsageCost(month: Int, year: Int) async throws -> UsageCostData {
         let data = try await authedGet("/api/v0/usage/cost?month=\(month)&year=\(year)")
-        let decoded = try decoder.decode(UsageCostResponse.self, from: data)
-        guard let biz = decoded.data?.bizData else {
-            throw PlatformError.invalidResponse
+        do {
+            let decoded = try decoder.decode(UsageCostResponse.self, from: data)
+            guard let biz = decoded.data?.bizData else {
+                let body = String(data: data, encoding: .utf8) ?? "(empty)"
+                print("[PlatformAPI] cost: bizData 为 nil，响应体: \(body.prefix(500))")
+                throw PlatformError.invalidResponse
+            }
+            return biz
+        } catch let decodeError as DecodingError {
+            let body = String(data: data, encoding: .utf8) ?? "(无法解码)"
+            print("[PlatformAPI] cost 解码失败: \(decodeError)，响应体: \(body.prefix(500))")
+            throw PlatformError.serverError(code: 200, body: "解码失败: \(decodeError.localizedDescription)")
         }
-        return biz
     }
 
     // MARK: - HTTP
@@ -168,6 +189,7 @@ struct LoginResponse: Codable {
     let data: LoginData?
     struct LoginData: Codable {
         let bizData: LoginBiz?
+        enum CodingKeys: String, CodingKey { case bizData = "biz_data" }
         struct LoginBiz: Codable {
             let user: LoginUser?
             struct LoginUser: Codable {
@@ -192,6 +214,7 @@ struct SummaryResponse: Codable {
     let data: SummaryWrap?
     struct SummaryWrap: Codable {
         let bizData: SummaryData?
+        enum CodingKeys: String, CodingKey { case bizData = "biz_data" }
     }
 }
 struct SummaryData: Codable {
@@ -201,6 +224,15 @@ struct SummaryData: Codable {
     let monthlyTokenUsage: String?
     let monthlyUsage: String?
     let totalUsage: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case normalWallets = "normal_wallets"
+        case bonusWallets = "bonus_wallets"
+        case monthlyCosts = "monthly_costs"
+        case monthlyTokenUsage = "monthly_token_usage"
+        case monthlyUsage = "monthly_usage"
+        case totalUsage = "total_usage"
+    }
 
     var totalBalanceCNY: Double {
         (normalWallets?.first(where: { $0.currency == "CNY" })?.balance).flatMap(Double.init) ?? 0
@@ -215,7 +247,6 @@ struct SummaryData: Codable {
 struct CostItem: Codable {
     let currency: String; let amount: String?
 }
-enum CodingKeys: String, CodingKey { case amount, currency }
 
 // MARK: - 用量响应
 
@@ -223,6 +254,7 @@ struct UsageAmountResponse: Codable {
     let data: AmountWrap?
     struct AmountWrap: Codable {
         let bizData: UsageAmountData?
+        enum CodingKeys: String, CodingKey { case bizData = "biz_data" }
     }
 }
 struct UsageAmountData: Codable {
@@ -248,6 +280,7 @@ struct UsageCostResponse: Codable {
     let data: CostWrap?
     struct CostWrap: Codable {
         let bizData: UsageCostData?
+        enum CodingKeys: String, CodingKey { case bizData = "biz_data" }
     }
 }
 struct UsageCostData: Codable {
