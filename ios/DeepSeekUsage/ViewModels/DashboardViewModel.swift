@@ -98,12 +98,11 @@ class DashboardViewModel: ObservableObject {
         errorMessage = nil
 
         // 并行加载余额、今日用量、30 天趋势
-        async let balanceTask = fetchBalance()
-        async let todayTask = fetchTodayUsage()
-        async let recentTask = fetchRecentUsage()
-
-        // 等待所有请求完成
-        _ = await (balanceTask, todayTask, recentTask)
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await self.fetchBalance() }
+            group.addTask { await self.fetchTodayUsage() }
+            group.addTask { await self.fetchRecentUsage() }
+        }
         isLoading = false
     }
 
@@ -115,9 +114,7 @@ class DashboardViewModel: ObservableObject {
     /// 手动触发余额抓取
     func triggerPoll() async {
         do {
-            let info = try await APIClient.shared.triggerBalancePoll()
-            // triggerBalancePoll 返回 BalanceInfo，但我们需要 BalanceDetail
-            // 所以重新 fetch balance
+            _ = try await APIClient.shared.triggerBalancePoll()
             _ = try? await APIClient.shared.fetchBalance()
             await loadAllData()
         } catch {

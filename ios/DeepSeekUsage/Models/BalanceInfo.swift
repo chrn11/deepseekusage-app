@@ -3,7 +3,7 @@ import Foundation
 /// 账户余额信息
 /// 对应后端 GET /api/balance 的响应
 struct BalanceInfo: Codable, Identifiable {
-    var id: String { currency }
+    var id: String { balanceInfos.first?.currency ?? "unknown" }
     let isAvailable: Bool
     let balanceInfos: [BalanceDetail]
 
