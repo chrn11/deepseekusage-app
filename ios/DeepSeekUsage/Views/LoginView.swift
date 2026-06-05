@@ -14,7 +14,7 @@ struct LoginView: View {
     @State private var isLoading = true
     @State private var loginState: WebViewLoginStep = .stepLoading
 
-    enum WebViewLoginStep {
+    enum WebViewLoginStep: Equatable {
         case stepLoading    // WebView 加载中
         case stepReady      // 登录页已加载，等待用户输入
         case stepSuccess    // 登录成功，正在提取凭据
