@@ -153,12 +153,19 @@ enum PlatformAPI {
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw PlatformError.invalidResponse }
 
-        switch http.statusCode {
+        let statusCode = http.statusCode
+        print("[PlatformAPI] \(path) → \(statusCode)")
+        if statusCode != 200 {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            print("[PlatformAPI] 错误响应体: \(body.prefix(300))")
+        }
+
+        switch statusCode {
         case 200: return data
         case 401: throw PlatformError.loginExpired
         default:
             let body = String(data: data, encoding: .utf8) ?? ""
-            throw PlatformError.serverError(code: http.statusCode, body: body)
+            throw PlatformError.serverError(code: statusCode, body: body)
         }
     }
 }
@@ -170,10 +177,10 @@ enum PlatformError: LocalizedError {
     case serverError(code: Int, body: String)
     var errorDescription: String? {
         switch self {
-        case .notLoggedIn:        "请先在设置中登录 DeepSeek 平台"
-        case .loginExpired:       "登录已过期，请重新登录"
-        case .loginFailed:        "邮箱或密码错误"
-        case .serverError(_, _):  "平台接口异常"
+        case .notLoggedIn:             "请先在设置中登录 DeepSeek 平台"
+        case .loginExpired:            "登录已过期，请重新登录"
+        case .loginFailed:             "邮箱或密码错误"
+        case .serverError(let code, _): "平台接口异常 (HTTP \(code))"
         default: nil
         }
     }
