@@ -28,6 +28,7 @@ struct SettingsView: View {
                     settingsHeader
                     apiKeySection
                     loginSection
+                    currencySection
                     alertSection
                     advancedSection
                     if diagResult != nil { diagResultSection }
@@ -137,6 +138,46 @@ struct SettingsView: View {
             .padding(14)
         }
         .background(secBg)
+    }
+
+    // MARK: 货币转换
+
+    @AppStorage("currency_rate") private var rate: Double = 0
+    @State private var rateText = ""
+
+    private var currencySection: some View {
+        VStack(spacing: 0) {
+            secHead("dollarsign.circle.fill", "货币转换", rate > 0
+                    ? "¥1 = $\(String(format: "%.4f", 1/rate)) · $1 = ¥\(String(format: "%.2f", rate))"
+                    : "关闭时显示原始币种")
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    Text("$1 = ¥").font(.system(size: 15, weight: .medium)).foregroundColor(Color(hex: "7B89A0"))
+                    TextField("如 7.25", text: $rateText)
+                        .keyboardType(.decimalPad)
+                        .font(.system(size: 16, weight: .medium, design: .monospaced))
+                        .foregroundColor(Color(hex: "E8EDF5"))
+                        .onChange(of: rateText) { v in
+                            rate = Double(v) ?? 0
+                        }
+                    if rate > 0 {
+                        Button("关闭") { rateText = ""; rate = 0 }
+                            .font(.system(size: 13)).foregroundColor(Color(hex: "FF6B6B"))
+                    }
+                }
+                .padding(12).background(Color(hex: "0A1228")).clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(
+                    rate > 0 ? Color(hex: "00E6A0").opacity(0.3) : Color.white.opacity(0.06), lineWidth: 1))
+
+                Text("输入当前美元兑人民币汇率，余额将以美元显示。留空或 0 则显示原始币种。")
+                    .font(.system(size: 11)).foregroundColor(Color(hex: "4A5A72"))
+            }
+            .padding(14)
+        }
+        .background(secBg)
+        .onAppear {
+            if rateText.isEmpty && rate > 0 { rateText = String(format: "%.2f", rate) }
+        }
     }
 
     // MARK: 余额预警

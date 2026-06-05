@@ -75,7 +75,12 @@ final class DashboardViewModel: ObservableObject {
                     currency: info.currency
                 ))
             }
-        } catch { errorMessage = error.localizedDescription }
+        } catch {
+            let ns = error as NSError
+            // NSURLErrorCancelled (-999): 刷新时前一个任务取消，无需报错
+            if ns.domain == NSURLErrorDomain && ns.code == -999 { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func loadPlatformData() async {
