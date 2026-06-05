@@ -1,5 +1,27 @@
 import Foundation
 
+// MARK: - 货币显示模式
+
+enum CurrencyDisplay: String, CaseIterable {
+    case cny = "仅人民币"
+    case usd = "仅美元"
+    case both = "双币种"
+
+    static var current: CurrencyDisplay {
+        get {
+            if let raw = UserDefaults.standard.string(forKey: "currency_display"),
+               let v = CurrencyDisplay(rawValue: raw) { return v }
+            return .cny
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "currency_display") }
+    }
+
+    /// 1 USD 默认汇率（约数，会随市场变化，用户可后续定制）
+    static let usdRate: Double = 7.25
+}
+
+// MARK: - API 响应
+
 struct DeepSeekBalanceResponse: Codable {
     let isAvailable: Bool
     let balanceInfos: [BalanceInfo]
@@ -23,32 +45,34 @@ struct BalanceInfo: Codable {
     var grantedBalanceValue: Double { Double(grantedBalance) ?? 0 }
     var toppedUpBalanceValue: Double { Double(toppedUpBalance) ?? 0 }
 
-    // MARK: - 货币转换
+    /// USD 换算值
+    var totalUSD:    Double { totalBalanceValue / CurrencyDisplay.usdRate }
+    var grantedUSD:  Double { grantedBalanceValue / CurrencyDisplay.usdRate }
+    var toppedUpUSD: Double { toppedUpBalanceValue / CurrencyDisplay.usdRate }
 
-    /// UserDefaults: "currency_rate" — 1 USD = ? CNY（如 7.2 表示 $1 = ¥7.2）
-    static var rate: Double {
-        get { UserDefaults.standard.double(forKey: "currency_rate") }
-        set { UserDefaults.standard.set(newValue, forKey: "currency_rate") }
-    }
-    static var rateEnabled: Bool { rate > 0 }
+    // MARK: - 格式化
 
-    private var symbol: String { currency == "CNY" ? "¥" : "$" }
-    private var convSymbol: String { currency == "CNY" ? "$" : "¥" }
-
-    func fmt(_ val: String) -> String {
-        let d = Double(val) ?? 0
-        guard BalanceInfo.rateEnabled, currency == "CNY" else { return "\(symbol)\(val)" }
-        let usd = d / BalanceInfo.rate
-        return "¥\(val) ≈ $\(String(format: "%.2f", usd))"
+    var formattedTotal: String {
+        switch CurrencyDisplay.current {
+        case .cny:  return "¥\(totalBalance)"
+        case .usd:  return "$\(String(format: "%.2f", totalUSD))"
+        case .both: return "¥\(totalBalance)  ·  $\(String(format: "%.2f", totalUSD))"
+        }
     }
 
-    func fmtCompact(_ val: String) -> String {
-        let d = Double(val) ?? 0
-        guard BalanceInfo.rateEnabled, currency == "CNY" else { return "\(symbol)\(val)" }
-        return "$\(String(format: "%.2f", d / BalanceInfo.rate))"
+    var formattedToppedUp: String {
+        switch CurrencyDisplay.current {
+        case .cny:  return "¥\(toppedUpBalance)"
+        case .usd:  return "$\(String(format: "%.2f", toppedUpUSD))"
+        case .both: return "¥\(toppedUpBalance)  ·  $\(String(format: "%.2f", toppedUpUSD))"
+        }
     }
 
-    var formattedTotal:    String { fmt(totalBalance) }
-    var formattedToppedUp: String { fmtCompact(toppedUpBalance) }
-    var formattedGranted:  String { fmtCompact(grantedBalance) }
+    var formattedGranted: String {
+        switch CurrencyDisplay.current {
+        case .cny:  return "¥\(grantedBalance)"
+        case .usd:  return "$\(String(format: "%.2f", grantedUSD))"
+        case .both: return "¥\(grantedBalance)  ·  $\(String(format: "%.2f", grantedUSD))"
+        }
+    }
 }

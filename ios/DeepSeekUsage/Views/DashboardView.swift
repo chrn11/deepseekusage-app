@@ -120,22 +120,11 @@ struct DashboardView: View {
                     }
                 }
 
-                // 金额 — 最大字号
+                // 金额
                 if let b = vm.balance {
-                    if BalanceInfo.rateEnabled {
-                        VStack(spacing: 4) {
-                            Text(b.formattedTotal)
-                                .font(.system(size: 38, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white)
-                            Text("≈ $\(String(format: "%.2f", b.totalBalanceValue / BalanceInfo.rate)) USD")
-                                .font(.system(size: 16, weight: .medium, design: .monospaced))
-                                .foregroundColor(Color(hex: "00E6A0"))
-                        }
-                    } else {
-                        Text(b.formattedTotal)
-                            .font(.system(size: 40, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-                    }
+                    Text(b.formattedTotal)
+                        .font(.system(size: CurrencyDisplay.current == .both ? 30 : 40, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
                 } else if KeychainManager.hasAPIKey {
                     Text("¥ --.--").font(.system(size: 40, weight: .bold, design: .monospaced))
                         .foregroundColor(.white.opacity(0.3))
