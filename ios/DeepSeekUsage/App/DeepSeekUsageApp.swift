@@ -1,14 +1,20 @@
 import SwiftUI
 
-/// DeepSeek 用量追踪 — 纯 iOS 原生 App
+/// DeepSeek 用量追踪 App 入口
 ///
-/// 不需要后端服务器。API Key 存钥匙串，余额快照存本地 JSON。
-/// iOS 16+ 即可运行。
+/// 设计方向："深海仪表盘" — 深蓝黑底色 + 生物荧光点缀
+/// 强制深色模式，全 App 统一色调
 @main
 struct DeepSeekUsageApp: App {
+    init() {
+        // 全局强制深色模式
+        UIView.appearance().overrideUserInterfaceStyle = .dark
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .preferredColorScheme(.dark)
         }
     }
 }
