@@ -27,13 +27,13 @@ struct DashboardView: View {
             .scrollIndicators(.hidden)
             .background(Color(hex: "060D17"))
             .toolbarBackground(.hidden, for: .navigationBar)
-            .refreshable { await vm.loadAll(); vm.calculateStats() }
+            .refreshable { await vm.loadAll(); vm.computeStats() }
             .alert("", isPresented: .constant(vm.errorMessage != nil)) {
                 Button("好") { vm.errorMessage = nil }
             } message: { Text(vm.errorMessage ?? "") }
             .task {
                 if vm.balance == nil { await vm.loadAll() }
-                vm.calculateStats()
+                vm.computeStats()
             }
         }
     }
@@ -56,7 +56,7 @@ struct DashboardView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) { pulseScale = 1 }
                 }
-                Task { await vm.loadAll(); vm.calculateStats() }
+                Task { await vm.loadAll(); vm.computeStats() }
             } label: {
                 ZStack {
                     if vm.isLoading {
@@ -169,7 +169,7 @@ struct DashboardView: View {
         }
     }
 
-    private var mLabel: String { vm.selectedMonth == YearMonth.current ? "本月" : "\(vm.selectedMonth.month)月" }
+    private var mLabel: String { vm.selectedYM == YearMonth.current ? "本月" : "\(vm.selectedYM.month)月" }
 
     private func statPill(_ title: String, _ val: String, _ icon: String, _ color: Color) -> some View {
         HStack(spacing: 8) {
@@ -197,7 +197,7 @@ struct DashboardView: View {
                     .frame(width: 40, height: 40)
             }.disabled(!canPrev)
 
-            Text(vm.selectedMonthLabel)
+            Text(vm.selectedYMLabel)
                 .font(.system(size: 17, weight: .semibold)).foregroundColor(.white).frame(maxWidth: .infinity)
 
             Button { withAnimation { vm.nextMonth() } } label: {
@@ -212,11 +212,11 @@ struct DashboardView: View {
     }
 
     private var canPrev: Bool {
-        guard let i = vm.availableMonths.firstIndex(of: vm.selectedMonth) else { return false }
+        guard let i = vm.availableMonths.firstIndex(of: vm.selectedYM) else { return false }
         return i + 1 < vm.availableMonths.count
     }
     private var canNext: Bool {
-        guard let i = vm.availableMonths.firstIndex(of: vm.selectedMonth) else { return false }
+        guard let i = vm.availableMonths.firstIndex(of: vm.selectedYM) else { return false }
         return i > 0
     }
 
