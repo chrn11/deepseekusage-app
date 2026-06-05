@@ -305,6 +305,10 @@ struct IOPair: Identifiable {
 
 struct YearMonth: Equatable, Hashable, Comparable {
     let year, month: Int
+    static var current: YearMonth {
+        let c = Calendar.current.dateComponents([.year, .month], from: Date())
+        return YearMonth(year: c.year ?? 2026, month: c.month ?? 1)
+    }
     init(year: Int, month: Int) { self.year = year; self.month = month }
 
     var label: String {

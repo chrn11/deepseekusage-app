@@ -197,7 +197,7 @@ struct DashboardView: View {
                     .frame(width: 40, height: 40)
             }.disabled(!canPrev)
 
-            Text(vm.selectedYMLabel)
+            Text(vm.selectedMonthLabel)
                 .font(.system(size: 17, weight: .semibold)).foregroundColor(.white).frame(maxWidth: .infinity)
 
             Button { withAnimation { vm.nextMonth() } } label: {
