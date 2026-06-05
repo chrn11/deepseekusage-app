@@ -6,6 +6,7 @@ import Charts
 struct DashboardView: View {
     @StateObject private var vm = DashboardViewModel()
     @State private var pulseScale: CGFloat = 1
+    @State private var showRecharge = false
 
     var body: some View {
         NavigationStack {
@@ -13,6 +14,7 @@ struct DashboardView: View {
                 VStack(spacing: 28) {
                     headerRow
                     balanceCard
+                    rechargeButton
                     quickStats
                     if vm.isLoggedIn { monthSelector }
                     if !vm.modelBreakdown.isEmpty { modelChart }
@@ -151,6 +153,44 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label).font(.system(size: 12, weight: .medium)).foregroundColor(Color(hex: "6A7A92"))
             Text(value).font(.system(size: 18, weight: .semibold, design: .monospaced)).foregroundColor(color)
+        }
+    }
+
+    // ═══════════════════════════════
+    // 充值
+    // ═══════════════════════════════
+
+    private var rechargeButton: some View {
+        Group {
+            if KeychainManager.hasToken {
+                Button {
+                    showRecharge = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "creditcard.fill")
+                            .font(.system(size: 16, weight: .medium))
+                        Text("充值")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .foregroundColor(Color(hex: "060D17"))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(hex: "00C6FF"), Color(hex: "00E6A0")],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .sheet(isPresented: $showRecharge) {
+                    RechargeView {
+                        showRecharge = false
+                        // 充值完成后自动刷新余额
+                        Task { await vm.loadAll(); vm.computeStats() }
+                    }
+                }
+            }
         }
     }
 
