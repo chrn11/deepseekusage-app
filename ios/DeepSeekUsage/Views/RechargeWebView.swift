@@ -4,7 +4,7 @@ import WebKit
 // MARK: - 充值页面
 
 /// 用 WKWebView 打开 DeepSeek 平台充值页面
-/// 注入已登录的 cookie（从 KeychainManager 读取），实现免登录充值
+/// 注入 localStorage（userToken）实现免登录
 /// 关闭页面时回调 onDismiss 通知仪表盘刷新余额
 struct RechargeView: View {
     let onDismiss: () -> Void
@@ -52,58 +52,107 @@ struct RechargeView: View {
 
     private func setupWebView() {
         let config = WKWebViewConfiguration()
+        // 使用 nonPersistent 避免数据残留，登录凭据通过 JS 注入
         config.websiteDataStore = WKWebsiteDataStore.nonPersistent()
 
         let wv = WKWebView(frame: .zero, configuration: config)
-        wv.navigationDelegate = WebViewNavDelegate.shared
+        wv.navigationDelegate = RechargeNavDelegate.shared
         wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
         wv.isOpaque = false
         wv.backgroundColor = UIColor(Color(hex: "060D17"))
 
-        // 注入 cookie
-        injectCookies(into: wv)
-
-        // 加载充值页面
-        if let url = URL(string: "https://platform.deepseek.com/usage") {
-            wv.load(URLRequest(url: url))
+        // 先加载一个空页面，注入凭据后再导航到充值页
+        if let blankURL = URL(string: "about:blank") {
+            wv.load(URLRequest(url: blankURL))
         }
 
         webView = wv
+
+        // 注入凭据后加载充值页
+        injectCredentialsAndNavigate(webView: wv)
     }
 
-    private func injectCookies(into wv: WKWebView) {
-        // 1. 从 Keychain 读取 token
-        guard let token = KeychainManager.loadToken(), !token.isEmpty else { return }
+    private func injectCredentialsAndNavigate(webView: WKWebView) {
+        guard let token = KeychainManager.loadToken(), !token.isEmpty else {
+            // 没有 token，直接加载登录页（不应该发生，充值按钮只在已登录时显示）
+            if let url = URL(string: "https://platform.deepseek.com/sign_in") {
+                webView.load(URLRequest(url: url))
+            }
+            return
+        }
 
-        // 2. 注入 Bearer token 作为 cookie
-        let authCookie = HTTPCookie(properties: [
+        // 第一步：先加载 deepseek 域名以设置 localStorage
+        if let baseURL = URL(string: "https://platform.deepseek.com/usage") {
+            var request = URLRequest(url: baseURL)
+            webView.load(request)
+        }
+
+        // 第二步：通过 WKUserScript 在页面加载时注入 token
+        // 转义 token 中的特殊字符
+        let escaped = token
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+
+        let script = WKUserScript(
+            source: "localStorage.setItem('userToken', JSON.stringify({value: '\(escaped)', __version: '0'}))",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+        webView.configuration.userContentController.addUserScript(script)
+
+        // 同时注入 cookie（浏览器可能也需要）
+        let cookies = createCookies(token: token)
+        let group = DispatchGroup()
+        for cookie in cookies {
+            group.enter()
+            webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) { group.leave() }
+        }
+
+        // 如果还有之前保存的 cookie 字符串，也注入
+        if let savedCookieStr = KeychainManager.loadCookie() {
+            let pairs = savedCookieStr.split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }
+            for pair in pairs {
+                let parts = pair.split(separator: "=", maxSplits: 1)
+                guard parts.count == 2 else { continue }
+                if let cookie = HTTPCookie(properties: [
+                    .name: String(parts[0]),
+                    .value: String(parts[1]),
+                    .domain: ".deepseek.com",
+                    .path: "/",
+                    .secure: true,
+                ]) {
+                    group.enter()
+                    webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) { group.leave() }
+                }
+            }
+        }
+
+        // cookie 全部设置完成后重新加载充值页
+        group.notify(queue: .main) {
+            if let url = URL(string: "https://platform.deepseek.com/top_up") {
+                webView.load(URLRequest(url: url))
+            }
+        }
+    }
+
+    private func createCookies(token: String) -> [HTTPCookie] {
+        let baseURL = URL(string: "https://platform.deepseek.com")!
+        var cookies: [HTTPCookie] = []
+
+        // Bearer token 作为 cookie
+        if let authCookie = HTTPCookie(properties: [
             .name: "authorization",
             .value: "Bearer \(token)",
             .domain: ".deepseek.com",
             .path: "/",
             .secure: true,
-        ])!
-        wv.configuration.websiteDataStore.httpCookieStore.setCookie(authCookie)
-
-        // 3. 从 Keychain 读取已保存的 cookie 字符串并逐个注入
-        if let cookieStr = KeychainManager.loadCookie() {
-            let pairs = cookieStr.split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }
-            for pair in pairs {
-                let parts = pair.split(separator: "=", maxSplits: 1)
-                guard parts.count == 2 else { continue }
-                let name = String(parts[0])
-                let value = String(parts[1])
-                if let cookie = HTTPCookie(properties: [
-                    .name: name,
-                    .value: value,
-                    .domain: ".deepseek.com",
-                    .path: "/",
-                    .secure: true,
-                ]) {
-                    wv.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
-                }
-            }
+        ]) {
+            cookies.append(authCookie)
         }
+
+        return cookies
     }
 }
 
@@ -117,22 +166,29 @@ struct WebViewRepresentable: UIViewRepresentable {
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
 
-// MARK: - 导航代理
+// MARK: - 充值导航代理
 
-final class WebViewNavDelegate: NSObject, WKNavigationDelegate {
-    static let shared = WebViewNavDelegate()
+final class RechargeNavDelegate: NSObject, WKNavigationDelegate {
+    static let shared = RechargeNavDelegate()
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        // 只允许 DeepSeek 平台域名，阻止外部跳转
         if let url = navigationAction.request.url {
             let host = url.host ?? ""
+            // 放行 DeepSeek 域名
             if host.hasSuffix("deepseek.com") {
                 decisionHandler(.allow)
                 return
             }
-            // 支付宝支付需要跳转到支付宝 App 或网页
-            if host.hasSuffix("alipay.com") || host.hasSuffix("alipay.cn") {
-                // 尝试打开支付宝 App
+            // 支付宝支付跳转
+            if host.hasSuffix("alipay.com") || host.hasSuffix("alipay.cn") || host.hasSuffix("alipayobjects.com") {
+                if UIApplication.shared.canOpenURL(url) {
+                    UIApplication.shared.open(url)
+                }
+                decisionHandler(.cancel)
+                return
+            }
+            // 微信支付跳转
+            if host.hasSuffix("wechat.com") || host.hasSuffix("weixin.qq.com") {
                 if UIApplication.shared.canOpenURL(url) {
                     UIApplication.shared.open(url)
                 }
@@ -141,22 +197,5 @@ final class WebViewNavDelegate: NSObject, WKNavigationDelegate {
             }
         }
         decisionHandler(.allow)
-    }
-
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        // 加载开始 — 可以显示 loading
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // 加载完成 — 通过 JS 注入 token 到 localStorage（DeepSeek 平台兼容）
-        if let token = KeychainManager.loadToken() {
-            // 转义 JS 注入中的特殊字符防止语法错误
-            let escaped = token
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "'", with: "\\'")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-                .replacingOccurrences(of: "\n", with: "\\n")
-            webView.evaluateJavaScript("localStorage.setItem('token', '\(escaped)')") { _, _ in }
-        }
     }
 }

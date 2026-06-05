@@ -7,6 +7,7 @@ struct DashboardView: View {
     @StateObject private var vm = DashboardViewModel()
     @State private var pulseScale: CGFloat = 1
     @State private var showRecharge = false
+    @State private var showLoginSheet = false
 
     var body: some View {
         NavigationStack {
@@ -36,6 +37,12 @@ struct DashboardView: View {
             .task {
                 if vm.balance == nil { await vm.loadAll() }
                 vm.computeStats()
+            }
+            .sheet(isPresented: $showLoginSheet) {
+                LoginView(onLoginSuccess: {
+                    showLoginSheet = false
+                    Task { await vm.loadAll(); vm.computeStats() }
+                })
             }
         }
     }
@@ -395,7 +402,9 @@ struct DashboardView: View {
     // ═══════════════════════════════
 
     private var loginBanner: some View {
-        NavigationLink { LoginView() } label: {
+        Button {
+            showLoginSheet = true
+        } label: {
             HStack(spacing: 12) {
                 Image(systemName: "sparkles").font(.system(size: 18)).foregroundColor(Color(hex: "7C5CFC"))
                 VStack(alignment: .leading, spacing: 3) {

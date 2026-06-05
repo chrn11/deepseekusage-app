@@ -6,7 +6,6 @@ struct SettingsView: View {
     @State private var isKeyVisible = false
     @State private var isTesting = false
     @State private var testResult: TestResult?
-    @State private var showLogin = false
 
     // 余额预警
     @AppStorage("balance_alert_threshold") private var alertThreshold: Double = 0
@@ -39,7 +38,7 @@ struct SettingsView: View {
                 if apiKey.isEmpty, let s = KeychainManager.loadAPIKey() { apiKey = s }
                 if thresholdText.isEmpty && alertThreshold > 0 { thresholdText = String(format: "%.0f", alertThreshold) }
             }
-            .sheet(isPresented: $showLogin) { LoginView() }
+            // LoginView 的 sheet 已移到 loginSection
         }
     }
 
@@ -96,6 +95,8 @@ struct SettingsView: View {
 
     // MARK: 登录
 
+    @State private var showLoginSheet = false
+
     private var loginSection: some View {
         VStack(spacing: 0) {
             secHead("person.badge.key.fill", "用量详情", "登录平台后获取 Token 消耗和费用曲线")
@@ -105,7 +106,7 @@ struct SettingsView: View {
                         Circle().fill(Color(hex: "00E6A0")).frame(width: 8, height: 8)
                         Text("已登录").font(.system(size: 14, weight: .medium)).foregroundColor(Color(hex: "00E6A0"))
                         Spacer()
-                        Button("重新登录") { showLogin = true }.font(.system(size: 13)).foregroundColor(Color(hex: "00C6FF"))
+                        Button("重新登录") { showLoginSheet = true }.font(.system(size: 13)).foregroundColor(Color(hex: "00C6FF"))
                     }
                     .padding(12).background(Color(hex: "0A1228")).clipShape(RoundedRectangle(cornerRadius: 10))
                     Button(role: .destructive) { KeychainManager.logoutPlatform() } label: {
@@ -113,7 +114,7 @@ struct SettingsView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 4)
                 } else {
-                    Button { showLogin = true } label: {
+                    Button { showLoginSheet = true } label: {
                         HStack {
                             Image(systemName: "person.badge.key.fill").font(.system(size: 15))
                             Text("登录 DeepSeek 平台").font(.system(size: 14, weight: .medium))
@@ -125,12 +126,17 @@ struct SettingsView: View {
                         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(hex: "7C5CFC").opacity(0.2), lineWidth: 1))
                     }
                 }
-                Text("Cookie 仅存钥匙串 · 过期可重新登录")
+                Text("在平台网页内登录 · 支持验证码")
                     .font(.system(size: 10)).foregroundColor(Color(hex: "4A5A72"))
             }
             .padding(14)
         }
         .background(secBg)
+        .sheet(isPresented: $showLoginSheet) {
+            LoginView(onLoginSuccess: {
+                showLoginSheet = false
+            })
+        }
     }
 
     // MARK: 货币显示
