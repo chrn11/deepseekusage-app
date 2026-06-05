@@ -251,9 +251,9 @@ struct DashboardView: View {
 
             // 摘要行
             HStack(spacing: 16) {
-                flowBlock(label: "输入", value: fmtTok(totalIn),  pct: inPct,  color: Color(hex: "00C6FF"))
-                flowBlock(label: "输出", value: fmtTok(totalOut), pct: outPct, color: Color(hex: "7C5CFC"))
-                flowBlock(label: "合计", value: fmtTok(totalAll), pct: 1,     color: Color(hex: "E8EDF5"))
+                FlowBlock(label: "输入", value: fmtTok(totalIn),  pct: inPct,  color: Color(hex: "00C6FF"))
+                FlowBlock(label: "输出", value: fmtTok(totalOut), pct: outPct, color: Color(hex: "7C5CFC"))
+                FlowBlock(label: "合计", value: fmtTok(totalAll), pct: 1,     color: Color(hex: "E8EDF5"))
             }
             .padding(.horizontal, 16).padding(.top, 10)
 
@@ -299,9 +299,9 @@ struct DashboardView: View {
 
             // KPI 行
             HStack(spacing: 16) {
-                kpiChip("总计", String(format: "¥%.2f", total), Color(hex: "00E6A0"))
-                kpiChip("峰值", String(format: "¥%.2f", peak), Color(hex: "FFD93D"))
-                kpiChip("日均", String(format: "¥%.2f", avg), Color(hex: "00C6FF"))
+            KpiChip(label: "总计", value: String(format: "¥%.2f", total), color: Color(hex: "00E6A0"))
+            KpiChip(label: "峰值", value: String(format: "¥%.2f", peak), color: Color(hex: "FFD93D"))
+            KpiChip(label: "日均", value: String(format: "¥%.2f", avg), color: Color(hex: "00C6FF"))
             }
             .padding(.horizontal, 16).padding(.top, 10)
 
@@ -406,7 +406,7 @@ struct MiniStat: View {
 
 // MARK: - FlowBlock（I/O 摘要块）
 
-struct flowBlock: View {
+struct FlowBlock: View {
     let label: String; let value: String; let pct: Double; let color: Color
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -425,7 +425,7 @@ struct flowBlock: View {
 
 // MARK: - KPI Chip 费用摘要
 
-struct kpiChip: View {
+struct KpiChip: View {
     let label: String; let value: String; let color: Color
     var body: some View {
         VStack(spacing: 2) {
