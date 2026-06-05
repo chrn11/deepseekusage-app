@@ -32,6 +32,9 @@ targets:
     sources:
       - path: ios/DeepSeekUsage
         type: group
+      - path: ios/DeepSeekUsage/Assets.xcassets
+        type: folder
+        buildPhase: resources
     settings:
       base:
         INFOPLIST_FILE: ios/Info.plist
@@ -39,7 +42,7 @@ targets:
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         PRODUCT_NAME: "DeepSeekUsage"
-        # ASSETCATALOG_COMPILER_APPICON_NAME: "AppIcon"
+        ASSETCATALOG_COMPILER_APPICON_NAME: "AppIcon"
         # iOS 16+ 不需要额外链接 Charts framework，SwiftUI Charts 内置于 SwiftUI
     preBuildScripts:
       # SwiftLint 你可以后续加上
