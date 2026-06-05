@@ -19,7 +19,7 @@ final class DashboardViewModel: ObservableObject {
     // MARK: - 平台用量
     @Published var isLoggedIn: Bool = false
     @Published var allAmounts: [DayAmount] = []
-    @Published var allCosts: [DayAmount] = []
+    @Published var allCostGroups: [CostCurrencyGroup] = []
     @Published var currentYear: Int
     @Published var currentMonth: Int
     @Published var availableMonths: [YearMonth] = []
@@ -93,12 +93,12 @@ final class DashboardViewModel: ObservableObject {
             if errorMessage == nil { errorMessage = "用量数据加载失败：\(error.localizedDescription)" }
         }
 
-        // 费用 (当前月)
+        // 费用 (当前月) — 接口按币种返回多组数据
         do {
-            let data = try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear)
-            allCosts = data.days ?? []
+            let groups = try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear)
+            allCostGroups = groups
         } catch {
-            allCosts = []
+            allCostGroups = []
             print("[Dashboard] cost 失败: \(error)")
             if errorMessage == nil { errorMessage = "费用数据加载失败：\(error.localizedDescription)" }
         }
@@ -123,8 +123,8 @@ final class DashboardViewModel: ObservableObject {
         Task {
             isLoading = true
             do { summary = try await PlatformAPI.fetchUsageSummary() } catch { print("[Dashboard] selectMonth summary: \(error)") }
-            do { allCosts   = (try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear)).days ?? [] }
-            catch { allCosts = []; errorMessage = "费用数据加载失败：\(error.localizedDescription)" }
+            do { allCostGroups   = try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear) }
+            catch { allCostGroups = []; errorMessage = "费用数据加载失败：\(error.localizedDescription)" }
             do { allAmounts = (try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear)).days ?? [] }
             catch { allAmounts = []; errorMessage = "用量数据加载失败：\(error.localizedDescription)" }
             computeStats()
@@ -157,18 +157,24 @@ final class DashboardViewModel: ObservableObject {
         let todayStr = df.string(from: now)
         let weekStart = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
 
-        // 从费用数据算每日消费
+        // 从费用数据算每日消费（合并所有币种组的 CNY 数据）
         var totalCost: Double = 0; var todayCost: Double = 0; var weekCost: Double = 0
         var totalTokens: Int = 0; var weekT: Int = 0; var totalCalls: Int = 0
 
-        for day in allCosts {
-            guard let dayModels = day.data else { continue }
-            for m in dayModels {
-                for u in (m.usage ?? []) {
-                    let amt = Double(u.amount ?? "0") ?? 0
-                    totalCost += amt
-                    if day.date == todayStr { todayCost += amt }
-                    if let d = df.date(from: day.date ?? ""), d >= weekStart { weekCost += amt }
+        for group in allCostGroups {
+            // 优先使用 CNY，如果用户主币种是 USD 则后述兜底时切换
+            let isCNY = group.currency == "CNY"
+            for day in (group.days ?? []) {
+                guard let dayModels = day.data else { continue }
+                for m in dayModels {
+                    for u in (m.usage ?? []) {
+                        let amt = Double(u.amount ?? "0") ?? 0
+                        if isCNY {
+                            totalCost += amt
+                            if day.date == todayStr { todayCost += amt }
+                            if let d = df.date(from: day.date ?? ""), d >= weekStart { weekCost += amt }
+                        }
+                    }
                 }
             }
         }
@@ -245,9 +251,10 @@ final class DashboardViewModel: ObservableObject {
         }.sorted { $0.date < $1.date }
     }
 
-    /// 费用每日聚合
+    /// 费用每日聚合（使用 CNY 组的数据）
     var costByDay: [DailyCost] {
-        allCosts.compactMap { day in
+        let cnyGroup = allCostGroups.first(where: { $0.currency == "CNY" }) ?? allCostGroups.first
+        return (cnyGroup?.days ?? []).compactMap { day in
             guard let models = day.data else { return nil }
             var total: Double = 0
             for m in models {

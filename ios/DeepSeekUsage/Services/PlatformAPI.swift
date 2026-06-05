@@ -114,7 +114,8 @@ enum PlatformAPI {
     // MARK: - 每日费用
 
     /// GET /api/v0/usage/cost?month=6&year=2026
-    static func fetchUsageCost(month: Int, year: Int) async throws -> UsageCostData {
+    /// 返回按币种分组的费用数据数组
+    static func fetchUsageCost(month: Int, year: Int) async throws -> [CostCurrencyGroup] {
         let data = try await authedGet("/api/v0/usage/cost?month=\(month)&year=\(year)")
         do {
             let decoded = try decoder.decode(UsageCostResponse.self, from: data)
@@ -212,7 +213,11 @@ struct LoginResponse: Codable {
 }
 
 struct WalletInfo: Codable {
-    let currency: String; let balance: String
+    let currency: String; let balance: String; let tokenEstimation: String?
+    enum CodingKeys: String, CodingKey {
+        case currency, balance
+        case tokenEstimation = "token_estimation"
+    }
 }
 
 // MARK: - 汇总响应
@@ -231,6 +236,8 @@ struct SummaryData: Codable {
     let monthlyTokenUsage: String?
     let monthlyUsage: String?
     let totalUsage: Int?
+    let currentToken: Int?
+    let totalAvailableTokenEstimation: String?
 
     enum CodingKeys: String, CodingKey {
         case normalWallets = "normal_wallets"
@@ -239,6 +246,8 @@ struct SummaryData: Codable {
         case monthlyTokenUsage = "monthly_token_usage"
         case monthlyUsage = "monthly_usage"
         case totalUsage = "total_usage"
+        case currentToken = "current_token"
+        case totalAvailableTokenEstimation = "total_available_token_estimation"
     }
 
     var totalBalanceCNY: Double {
@@ -286,11 +295,14 @@ struct UsageEntry: Codable {
 struct UsageCostResponse: Codable {
     let data: CostWrap?
     struct CostWrap: Codable {
-        let bizData: UsageCostData?
+        // biz_data 是数组，每个元素按币种分组
+        let bizData: [CostCurrencyGroup]?
         enum CodingKeys: String, CodingKey { case bizData = "biz_data" }
     }
 }
-struct UsageCostData: Codable {
+/// 按币种分组的费用数据
+struct CostCurrencyGroup: Codable {
     let total: [ModelUsage]?
     let days: [DayAmount]?
+    let currency: String?
 }
