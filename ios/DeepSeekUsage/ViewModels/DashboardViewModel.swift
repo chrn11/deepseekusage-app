@@ -68,7 +68,15 @@ final class DashboardViewModel: ObservableObject {
         guard KeychainManager.hasAPIKey else { return }
         do {
             let resp = try await DeepSeekAPI.fetchBalance()
-            balance = resp.balanceInfos.first
+            // 根据 CurrencyDisplay 设置选取对应币种余额，避免 .first 导致币种跳动
+            let preferred: String
+            switch CurrencyDisplay.current {
+            case .usd:  preferred = "USD"
+            case .cny, .both: preferred = "CNY"
+            }
+            balance = resp.balanceInfos.first(where: { $0.currency == preferred })
+                ?? resp.balanceInfos.first(where: { $0.currency == "CNY" })
+                ?? resp.balanceInfos.first
         } catch {
             let ns = error as NSError
             if ns.domain == NSURLErrorDomain && ns.code == -999 { return }
