@@ -71,3 +71,4 @@ Thumbs.db
 # ======================
 Payload/
 backend/db.sqlite
+.ace-tool/

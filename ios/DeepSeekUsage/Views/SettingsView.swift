@@ -7,10 +7,6 @@ struct SettingsView: View {
     @State private var isTesting = false
     @State private var testResult: TestResult?
 
-    // 余额预警
-    @AppStorage("balance_alert_threshold") private var alertThreshold: Double = 0
-    @State private var thresholdText = ""
-
     enum TestResult: Equatable {
         case success(balance: String)
         case failure(String)
@@ -24,7 +20,6 @@ struct SettingsView: View {
                     apiKeySection
                     loginSection
                     currencySection
-                    alertSection
                     if let r = testResult { resultSection(r) }
                     aboutSection
                 }
@@ -36,7 +31,6 @@ struct SettingsView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
             .onAppear {
                 if apiKey.isEmpty, let s = KeychainManager.loadAPIKey() { apiKey = s }
-                if thresholdText.isEmpty && alertThreshold > 0 { thresholdText = String(format: "%.0f", alertThreshold) }
             }
             // LoginView 的 sheet 已移到 loginSection
         }
@@ -162,47 +156,8 @@ struct SettingsView: View {
                         .padding(12).background(Color(hex: "0A1228")).clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                 }
-                Text("汇率约 $1 = ¥\(String(format: "%.2f", CurrencyDisplay.usdRate)) · 仅影响本 App 显示")
-                    .font(.system(size: 11)).foregroundColor(Color(hex: "5C6E82"))
-            }
-            .padding(14)
-        }
-        .background(secBg)
-    }
-
-    // MARK: 余额预警
-
-    private var alertSection: some View {
-        VStack(spacing: 0) {
-            secHead("bell.badge.fill", "余额预警", "余额低于阈值时推送通知提醒")
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    Text("¥")
-                        .font(.system(size: 16, weight: .bold)).foregroundColor(Color(hex: "00C6FF"))
-                    TextField("预警阈值", text: $thresholdText)
-                        .keyboardType(.decimalPad)
-                        .font(.system(size: 15, weight: .medium, design: .monospaced))
-                        .foregroundColor(Color(hex: "E8EDF5"))
-                        .onChange(of: thresholdText) { v in
-                            alertThreshold = Double(v) ?? 0
-                        }
-                    if alertThreshold > 0 {
-                        Button("清除") { thresholdText = ""; alertThreshold = 0 }
-                            .font(.system(size: 12)).foregroundColor(Color(hex: "FF6B6B"))
-                    }
-                }
-                .padding(12).background(Color(hex: "0A1228")).clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(
-                    alertThreshold > 0 ? Color(hex: "FF6B6B").opacity(0.3) : Color.white.opacity(0.12), lineWidth: 1))
-
-                if alertThreshold > 0 {
-                    HStack {
-                        Image(systemName: "info.circle.fill").font(.system(size: 11)).foregroundColor(Color(hex: "FF6B6B"))
-                        Text("余额低于 ¥\(String(format: "%.0f", alertThreshold)) 时会收到通知")
-                            .font(.system(size: 11)).foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
-                    }
-                    .padding(.horizontal, 4)
-                }
+                    Text("切换余额显示的币种 · 数据来自平台接口")
+                        .font(.system(size: 10)).foregroundColor(Color(hex: "5C6E82"))
             }
             .padding(14)
         }
@@ -303,7 +258,7 @@ struct SettingsView: View {
         Task {
             do {
                 let r = try await DeepSeekAPI.validateKey(t)
-                testResult = .success(balance: r.balanceInfos.first?.formattedTotal ?? "OK")
+                testResult = .success(balance: r.balanceInfos.primary?.formattedTotal ?? "OK")
                 try? KeychainManager.saveAPIKey(t)
             } catch {
                 testResult = .failure(error.localizedDescription)

@@ -16,8 +16,13 @@ enum CurrencyDisplay: String, CaseIterable {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "currency_display") }
     }
 
-    /// 1 USD 默认汇率（约数，会随市场变化，用户可后续定制）
-    static let usdRate: Double = 7.25
+    /// 币种显示目标：主显示用哪个货币
+    var primaryCurrency: String {
+        switch self {
+        case .cny, .both: return "CNY"
+        case .usd:         return "USD"
+        }
+    }
 }
 
 // MARK: - API 响应
@@ -45,34 +50,52 @@ struct BalanceInfo: Codable {
     var grantedBalanceValue: Double { Double(grantedBalance) ?? 0 }
     var toppedUpBalanceValue: Double { Double(toppedUpBalance) ?? 0 }
 
-    /// USD 换算值
-    var totalUSD:    Double { totalBalanceValue / CurrencyDisplay.usdRate }
-    var grantedUSD:  Double { grantedBalanceValue / CurrencyDisplay.usdRate }
-    var toppedUpUSD: Double { toppedUpBalanceValue / CurrencyDisplay.usdRate }
+    // MARK: - 币种判断
 
-    // MARK: - 格式化
+    var isCNY: Bool { currency == "CNY" }
+    var isUSD: Bool { currency == "USD" }
+
+    // MARK: - 格式化（直接用 API 原始数据，不做手动汇率换算）
 
     var formattedTotal: String {
-        switch CurrencyDisplay.current {
-        case .cny:  return "¥\(totalBalance)"
-        case .usd:  return "$\(String(format: "%.2f", totalUSD))"
-        case .both: return "¥\(totalBalance)  ·  $\(String(format: "%.2f", totalUSD))"
-        }
+        currency == "CNY"
+            ? "¥\(totalBalance)"
+            : "$\(totalBalance)"
     }
 
     var formattedToppedUp: String {
-        switch CurrencyDisplay.current {
-        case .cny:  return "¥\(toppedUpBalance)"
-        case .usd:  return "$\(String(format: "%.2f", toppedUpUSD))"
-        case .both: return "¥\(toppedUpBalance)  ·  $\(String(format: "%.2f", toppedUpUSD))"
-        }
+        currency == "CNY"
+            ? "¥\(toppedUpBalance)"
+            : "$\(toppedUpBalance)"
     }
 
     var formattedGranted: String {
-        switch CurrencyDisplay.current {
-        case .cny:  return "¥\(grantedBalance)"
-        case .usd:  return "$\(String(format: "%.2f", grantedUSD))"
-        case .both: return "¥\(grantedBalance)  ·  $\(String(format: "%.2f", grantedUSD))"
+        currency == "CNY"
+            ? "¥\(grantedBalance)"
+            : "$\(grantedBalance)"
+    }
+}
+
+// MARK: - 余额数组辅助：根据显示设置选取币种
+
+extension [BalanceInfo] {
+    /// 按 CurrencyDisplay 设置选取主显示币种的余额
+    var primary: BalanceInfo? {
+        let preferred = CurrencyDisplay.current.primaryCurrency
+        return first(where: { $0.currency == preferred })
+            ?? first(where: { $0.currency == "CNY" })
+            ?? first
+    }
+
+    var cny: BalanceInfo? { first(where: { $0.isCNY }) }
+    var usd: BalanceInfo? { first(where: { $0.isUSD }) }
+
+    /// 双币种显示格式：¥x.xx · $x.xx
+    var formattedBoth: String {
+        let c = cny, u = usd
+        if let c, let u {
+            return "¥\(c.totalBalance)  ·  $\(String(format: "%.2f", u.totalBalanceValue))"
         }
+        return cny?.formattedTotal ?? usd?.formattedTotal ?? "--"
     }
 }

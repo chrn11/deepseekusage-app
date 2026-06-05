@@ -116,24 +116,30 @@ struct DashboardView: View {
                             .foregroundColor(Color(hex: "A0B0CC"))
                     }
                     Spacer()
-                    if vm.alertEnabled, let b = vm.balance, b.totalBalanceValue <= vm.alertThreshold {
-                        Label("余额不足", systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 12, weight: .bold)).foregroundColor(Color(hex: "FF6B6B"))
-                            .padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(Color(hex: "FF6B6B").opacity(0.15)).clipShape(Capsule())
-                    }
-                    if let c = vm.balance?.currency {
-                        Text(c).font(.system(size: 13, weight: .bold)).foregroundColor(Color(hex: "00C6FF"))
-                            .padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(Color(hex: "00C6FF").opacity(0.12)).clipShape(Capsule())
+                    // 币种标签：双币种模式显示两个
+                    if CurrencyDisplay.current == .both {
+                        if let c = vm.balanceInfos.cny?.currency {
+                            currencyTag(c)
+                        }
+                        if let u = vm.balanceInfos.usd?.currency {
+                            currencyTag(u)
+                        }
+                    } else if let c = vm.balance?.currency {
+                        currencyTag(c)
                     }
                 }
 
                 // 金额
-                if let b = vm.balance {
-                    Text(b.formattedTotal)
-                        .font(.system(size: CurrencyDisplay.current == .both ? 30 : 40, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
+                if !vm.balanceInfos.isEmpty {
+                    if CurrencyDisplay.current == .both {
+                        Text(vm.balanceBothText)
+                            .font(.system(size: 30, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                    } else if let b = vm.balance {
+                        Text(b.formattedTotal)
+                            .font(.system(size: 40, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                    }
                 } else if KeychainManager.hasAPIKey {
                     Text("¥ --.--").font(.system(size: 40, weight: .bold, design: .monospaced))
                         .foregroundColor(.white.opacity(0.3))
@@ -142,7 +148,7 @@ struct DashboardView: View {
                         .foregroundColor(Color(hex: "A0B0CC"))
                 }
 
-                // 充值/赠送
+                // 充值/赠送（取主币种数据）
                 if let b = vm.balance {
                     HStack(spacing: 0) {
                         subRow("充值", b.formattedToppedUp, Color(hex: "00E6A0"))
@@ -154,6 +160,12 @@ struct DashboardView: View {
             }
             .padding(24)
         }
+    }
+
+    private func currencyTag(_ text: String) -> some View {
+        Text(text).font(.system(size: 13, weight: .bold)).foregroundColor(Color(hex: "00C6FF"))
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(Color(hex: "00C6FF").opacity(0.12)).clipShape(Capsule())
     }
 
     private func subRow(_ label: String, _ value: String, _ color: Color) -> some View {
@@ -206,12 +218,20 @@ struct DashboardView: View {
     // ═══════════════════════════════
 
     private var quickStats: some View {
-        HStack(spacing: 12) {
-            statPill("今日", vm.formattedTodaySpend, "clock", Color(hex: "FF6B6B"))
-            statPill("本周", vm.formattedWeekSpend, "calendar.badge.clock", Color(hex: "00C6FF"))
-            statPill(mLabel, vm.formattedMonthSpend, "calendar", Color(hex: "7C5CFC"))
-            if vm.isLoggedIn {
-                statPill("调用", "\(vm.monthCalls)次", "arrow.up.message", Color(hex: "00E6A0"))
+        let pills: [(String, String, String, Color)] = [
+            ("今日", vm.formattedTodaySpend, "clock", Color(hex: "FF6B6B")),
+            ("本周", vm.formattedWeekSpend, "calendar.badge.clock", Color(hex: "00C6FF")),
+            (mLabel, vm.formattedMonthSpend, "calendar", Color(hex: "7C5CFC")),
+        ]
+        let callPill: (String, String, String, Color)? = vm.isLoggedIn
+            ? ("调用", "\(vm.monthCalls)次", "arrow.up.message", Color(hex: "00E6A0")) : nil
+
+        let items = callPill.map { pills + [$0] } ?? pills
+        let cols = Array(items.enumerated())
+
+        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 10) {
+            ForEach(cols, id: \.offset) { _, item in
+                statPill(item.0, item.1, item.2, item.3)
             }
         }
     }

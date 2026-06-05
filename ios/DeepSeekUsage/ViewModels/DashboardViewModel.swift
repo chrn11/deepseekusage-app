@@ -1,13 +1,20 @@
 import Foundation
 import SwiftUI
-import UserNotifications
 
 @MainActor
 final class DashboardViewModel: ObservableObject {
 
     // MARK: - 余额
-    @Published var balance: BalanceInfo?
+    @Published var balanceInfos: [BalanceInfo] = []
     @Published var summary: SummaryData?
+
+    // MARK: - 余额便捷访问（根据币种设置选取）
+
+    /// 当前设置对应的主余额
+    var balance: BalanceInfo? { balanceInfos.primary }
+
+    /// 双币种显示文字
+    var balanceBothText: String { balanceInfos.formattedBoth }
 
     // MARK: - 平台用量
     @Published var isLoggedIn: Bool = false
@@ -27,12 +34,7 @@ final class DashboardViewModel: ObservableObject {
 
     @Published var isLoading = false
     @Published var errorMessage: String?
-    @Published var alertThreshold: Double {
-        didSet { UserDefaults.standard.set(alertThreshold, forKey: "balance_alert_threshold") }
-    }
-    var alertEnabled: Bool { alertThreshold > 0 }
 
-    private var lastAlertBalance: Double = -1
     private var loadTask: Task<Void, Never>?
 
     init() {
@@ -40,7 +42,6 @@ final class DashboardViewModel: ObservableObject {
         let cal = Calendar.current
         currentYear  = cal.component(.year, from: now)
         currentMonth = cal.component(.month, from: now)
-        alertThreshold = UserDefaults.standard.double(forKey: "balance_alert_threshold")
     }
 
     // MARK: - 加载
@@ -57,7 +58,6 @@ final class DashboardViewModel: ObservableObject {
 
             if !Task.isCancelled {
                 computeStats()
-                checkAlert()
                 isLoading = false
             }
         }
@@ -68,15 +68,7 @@ final class DashboardViewModel: ObservableObject {
         guard KeychainManager.hasAPIKey else { return }
         do {
             let resp = try await DeepSeekAPI.fetchBalance()
-            // 根据 CurrencyDisplay 设置选取对应币种余额，避免 .first 导致币种跳动
-            let preferred: String
-            switch CurrencyDisplay.current {
-            case .usd:  preferred = "USD"
-            case .cny, .both: preferred = "CNY"
-            }
-            balance = resp.balanceInfos.first(where: { $0.currency == preferred })
-                ?? resp.balanceInfos.first(where: { $0.currency == "CNY" })
-                ?? resp.balanceInfos.first
+            balanceInfos = resp.balanceInfos
         } catch {
             let ns = error as NSError
             if ns.domain == NSURLErrorDomain && ns.code == -999 { return }
@@ -122,10 +114,11 @@ final class DashboardViewModel: ObservableObject {
         // 切月份需要重新拉数据
         Task {
             isLoading = true
+            do { summary = try await PlatformAPI.fetchUsageSummary() } catch { /* summary 可选，忽略 */ }
             do { allCosts   = (try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear)).days ?? [] }
-            catch { allCosts = [] }
+            catch { allCosts = []; errorMessage = "费用数据加载失败" }
             do { allAmounts = (try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear)).days ?? [] }
-            catch { allAmounts = [] }
+            catch { allAmounts = []; errorMessage = "用量数据加载失败" }
             computeStats()
             isLoading = false
         }
@@ -183,9 +176,6 @@ final class DashboardViewModel: ObservableObject {
                     else { dTokens += amt }
                 }
                 totalTokens += dTokens; totalCalls += dCalls
-                if day.date == todayStr {
-                    // today part already handled above
-                }
                 if let d = df.date(from: day.date ?? ""), d >= weekStart {
                     weekT += dTokens
                 }
@@ -199,8 +189,15 @@ final class DashboardViewModel: ObservableObject {
         monthCalls = totalCalls
         weekTokens = weekT
 
-        // fallback from summary
-        if totalCost == 0 { monthSpend = summary?.costCNY ?? summary?.costUSD ?? 0 }
+        // summary 兜底：当明细数据不可用时用汇总接口的数据
+        if let s = summary {
+            // 月度消费：明细为0时用 summary
+            if monthSpend == 0 { monthSpend = s.costCNY > 0 ? s.costCNY : s.costUSD }
+            // Token 总量
+            if monthTokens == 0, let t = s.totalUsage { monthTokens = t }
+            // 调用次数
+            if monthCalls == 0, let t = s.monthlyTokenUsage.flatMap(Int.init) { monthCalls = t }
+        }
     }
 
     // MARK: - 摘要
@@ -254,21 +251,7 @@ final class DashboardViewModel: ObservableObject {
         }.sorted { $0.date < $1.date }
     }
 
-    // MARK: - alert
-
-    func checkAlert() {
-        guard alertEnabled, let b = balance else { return }
-        let total = b.totalBalanceValue
-        if total <= alertThreshold, abs(total - lastAlertBalance) > 0.01 {
-            lastAlertBalance = total
-            let content = UNMutableNotificationContent()
-            content.title = "余额不足"
-            content.body = "¥\(String(format: "%.2f", total))，低于预警线 ¥\(String(format: "%.0f", alertThreshold))"
-            content.sound = .default
-            UNUserNotificationCenter.current().add(
-                UNNotificationRequest(identifier: "bal_\(Date().timeIntervalSince1970)", content: content, trigger: nil)
-            )
-        }
+}
     }
 
     // MARK: - fmt
