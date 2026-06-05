@@ -34,11 +34,11 @@
 
 ## 怎么装
 
-### 方式一：TrollStore（推荐，无需 Mac）
+### 下载 IPA
 
-去 [Actions](https://github.com/chrn11/deepseekusage-app/actions) 页面下载最新的 `DeepSeekUsage.ipa`，传到 iPhone 用 TrollStore 打开即可。永久签名，无需续签。
+去 [Actions](https://github.com/chrn11/deepseekusage-app/actions) 页面下载最新的 `DeepSeekUsage.ipa`，AirDrop 到 iPhone 即可安装。
 
-### 方式二：Xcode 编译
+### 本地编译
 
 ```bash
 brew install xcodegen

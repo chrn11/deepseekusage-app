@@ -2,9 +2,9 @@
 
 ## 安装
 
-### TrollStore
+### 下载 IPA
 
-从 [GitHub Actions](https://github.com/chrn11/deepseekusage-app/actions) 下载最新构建产物 `DeepSeekUsage.ipa`，AirDrop 到 iPhone，TrollStore 打开安装。
+从 [GitHub Actions](https://github.com/chrn11/deepseekusage-app/actions) 下载最新构建产物 `DeepSeekUsage.ipa`，AirDrop 到 iPhone 安装。
 
 ### Xcode 本地编译
 
