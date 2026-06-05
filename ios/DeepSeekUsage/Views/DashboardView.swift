@@ -298,13 +298,8 @@ struct DashboardView: View {
             }
             .chartYAxis {
                 AxisMarks {
-                    AxisValueLabel {
-                        if let v = $0.as(Double.self) {
-                            Text("¥\(String(format: "%.0f", v))")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Color(hex: "5A6A82"))
-                        }
-                    }
+                    AxisValueLabel()
+                        .foregroundStyle(Color(hex: "5A6A82"))
                     AxisGridLine()
                         .foregroundStyle(Color.white.opacity(0.04))
                 }
