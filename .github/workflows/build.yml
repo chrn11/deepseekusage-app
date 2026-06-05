@@ -17,6 +17,18 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_16.app || true
           xcodebuild -version
 
+      - name: Install iOS Simulator Runtime
+        run: |
+          # actool 编译 Asset Catalog 时需要模拟器运行时来验证 universal 图标
+          # 检查是否已安装，未安装则下载
+          RUNTIME_ID=$(xcrun simctl list runtimes | grep -oE 'com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+' | head -1 || true)
+          if [ -z "$RUNTIME_ID" ]; then
+            echo "No iOS runtime found, downloading..."
+            xcodebuild -downloadPlatform iOS
+          else
+            echo "iOS runtime already available: $RUNTIME_ID"
+          fi
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
