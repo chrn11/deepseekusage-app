@@ -195,7 +195,6 @@ struct DashboardView: View {
                            angularInset: 2)
                     .foregroundStyle(by: .value("模型", m.model))
             }
-            .chartForegroundStyleScale(modelColors)
             .chartLegend(position: .bottom, alignment: .center, spacing: 8) {
                 ForEach(vm.modelBreakdown) { m in
                     HStack(spacing: 4) {

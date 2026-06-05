@@ -152,7 +152,7 @@ struct SettingsView: View {
                         .keyboardType(.decimalPad)
                         .font(.system(size: 15, weight: .medium, design: .monospaced))
                         .foregroundColor(Color(hex: "E8EDF5"))
-                        .onChange(of: thresholdText) { _, v in
+                        .onChange(of: thresholdText) { v in
                             alertThreshold = Double(v) ?? 0
                         }
                     if alertThreshold > 0 {
