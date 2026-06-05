@@ -2,11 +2,6 @@ import SwiftUI
 import Charts
 
 /// 仪表盘主页
-///
-/// 展示：
-/// - 账户余额卡片
-/// - 今日 / 本周 / 本月消费
-/// - 30 天消费趋势图
 struct DashboardView: View {
     @StateObject private var vm = DashboardViewModel()
 
@@ -14,18 +9,34 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    // 余额卡片
+                    // 余额
                     balanceCard
 
-                    // 今日 / 本周 / 本月
+                    // 消费统计
                     HStack(spacing: 12) {
-                        StatCard(title: "今日", value: vm.formattedTodaySpend, color: .orange, icon: "clock")
-                        StatCard(title: "本周", value: vm.formattedWeekSpend, color: .blue, icon: "calendar.badge.clock")
-                        StatCard(title: "本月", value: vm.formattedMonthSpend, color: .purple, icon: "calendar")
+                        StatCard(title: "今日消费", value: vm.formattedTodaySpend, color: .orange, icon: "clock")
+                        StatCard(title: "本周消费", value: vm.formattedWeekSpend, color: .blue, icon: "calendar.badge.clock")
+                        StatCard(title: "本月消费", value: vm.formattedMonthSpend, color: .purple, icon: "calendar")
                     }
 
-                    // 趋势图
-                    chartSection
+                    // Token 统计（平台登录后才显示）
+                    if vm.isLoggedIn && (vm.weekTokens > 0 || vm.monthTokens > 0) {
+                        HStack(spacing: 12) {
+                            StatCard(title: "本周 Token", value: vm.formattedWeekTokens, color: .green, icon: "text.word.spacing")
+                            StatCard(title: "本月 Token", value: vm.formattedMonthTokens, color: .teal, icon: "text.alignleft")
+                            StatCard(title: "调用次数", value: "\(vm.monthCalls)次", color: .indigo, icon: "arrow.up.message")
+                        }
+                    }
+
+                    // 每日用量折线图（平台接口）
+                    if !vm.dailyCosts.isEmpty {
+                        platformChart
+                    }
+
+                    // 登录提示
+                    if !vm.isLoggedIn {
+                        loginBanner
+                    }
                 }
                 .padding()
             }
@@ -37,25 +48,21 @@ struct DashboardView: View {
                         ProgressView()
                     } else {
                         Button {
-                            Task { await vm.loadData() }
+                            Task { await vm.loadAll() }
                         } label: {
                             Image(systemName: "arrow.triangle.2.circlepath")
                         }
                     }
                 }
             }
-            .refreshable {
-                await vm.loadData()
-            }
+            .refreshable { await vm.loadAll() }
             .alert("错误", isPresented: .constant(vm.errorMessage != nil)) {
                 Button("确定") { vm.errorMessage = nil }
             } message: {
                 Text(vm.errorMessage ?? "")
             }
             .task {
-                if vm.balance == nil {
-                    await vm.loadData()
-                }
+                if vm.balance == nil { await vm.loadAll() }
                 vm.calculateStats()
             }
         }
@@ -66,18 +73,13 @@ struct DashboardView: View {
     private var balanceCard: some View {
         VStack(spacing: 12) {
             HStack {
-                Image(systemName: "creditcard.fill")
-                    .foregroundColor(.white)
-                Text("账户余额")
-                    .font(.headline)
-                    .foregroundColor(.white.opacity(0.9))
+                Image(systemName: "creditcard.fill").foregroundColor(.white)
+                Text("账户余额").font(.headline).foregroundColor(.white.opacity(0.9))
                 Spacer()
                 Text(vm.balance?.currency ?? "---")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.7))
+                    .font(.caption).foregroundColor(.white.opacity(0.7))
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(.white.opacity(0.2))
-                    .clipShape(Capsule())
+                    .background(.white.opacity(0.2)).clipShape(Capsule())
             }
 
             if let b = vm.balance {
@@ -96,11 +98,13 @@ struct DashboardView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            } else if KeychainManager.hasAPIKey {
+                Text("¥ --.--")
+                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
             } else {
-                Text(vm.errorMessage?.contains("请先在设置中填入") == true
-                     ? "请在设置中填入 API Key"
-                     : "¥ --.--")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                Text("请在设置中填入 API Key")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.7))
             }
         }
@@ -109,68 +113,77 @@ struct DashboardView: View {
             LinearGradient(
                 colors: [Color(red: 0.2, green: 0.4, blue: 0.9),
                          Color(red: 0.1, green: 0.3, blue: 0.7)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                startPoint: .topLeading, endPoint: .bottomTrailing
             )
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
-    // MARK: - 趋势图
+    // MARK: - 平台用量图（有 Cookie 时显示）
 
-    private var chartSection: some View {
+    private var platformChart: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("消费趋势（最近30天）", systemImage: "chart.line.uptrend.xyaxis")
+            Label("消费趋势（DeepSeek 平台数据）", systemImage: "chart.line.uptrend.xyaxis")
                 .font(.headline)
 
-            if vm.dailyStats.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "chart.bar.xaxis")
-                        .font(.system(size: 40))
-                        .foregroundColor(.secondary.opacity(0.4))
-                    Text("多刷新几次就有数据了")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                .frame(height: 200).frame(maxWidth: .infinity)
-            } else {
-                Chart(vm.dailyStats) { stat in
-                    BarMark(
-                        x: .value("日期", stat.shortDate),
-                        y: .value("消费", stat.spend)
+            Chart(dailyCosts) { item in
+                BarMark(
+                    x: .value("日期", item.formattedDate),
+                    y: .value("消费", item.cost)
+                )
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [.blue.opacity(0.8), .blue.opacity(0.3)],
+                        startPoint: .top, endPoint: .bottom
                     )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.blue.opacity(0.8), .blue.opacity(0.3)],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .cornerRadius(4)
+                )
+                .cornerRadius(4)
+            }
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .day, count: 5)) { _ in
+                    AxisValueLabel()
                 }
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .day, count: 5)) {
-                        AxisValueLabel()
-                    }
-                }
-                .chartYAxis {
-                    AxisMarks { value in
-                        AxisValueLabel {
-                            if let v = value.as(Double.self) {
-                                Text("¥\(String(format: "%.0f", v))").font(.caption2)
-                            }
+            }
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisValueLabel {
+                        if let v = value.as(Double.self) {
+                            Text("¥\(String(format: "%.0f", v))").font(.caption2)
                         }
                     }
                 }
-                .frame(height: 200)
             }
+            .frame(height: 200)
         }
         .padding(16)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
+
+    // MARK: - 登录提示
+
+    private var loginBanner: some View {
+        NavigationLink {
+            LoginView()
+        } label: {
+            HStack {
+                Image(systemName: "person.badge.key")
+                Text("登录 DeepSeek 平台查看详细用量").font(.subheadline)
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption).foregroundColor(.secondary)
+            }
+            .padding(14)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(.blue.opacity(0.3), lineWidth: 1)
+            )
+        }
+    }
 }
 
-// MARK: - 统计小卡片
+// MARK: - 统计卡片
 
 struct StatCard: View {
     let title: String
@@ -180,14 +193,9 @@ struct StatCard: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundColor(color)
-            Text(value)
-                .font(.subheadline.bold())
-            Text(title)
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            Image(systemName: icon).font(.caption).foregroundColor(color)
+            Text(value).font(.subheadline.bold())
+            Text(title).font(.caption2).foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)

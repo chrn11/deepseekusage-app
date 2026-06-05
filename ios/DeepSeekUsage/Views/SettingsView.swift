@@ -1,15 +1,12 @@
 import SwiftUI
 
 /// 设置页面
-///
-/// - 输入 / 管理 DeepSeek API Key（安全存储在 Keychain）
-/// - 测试连接
-/// - 版本信息
 struct SettingsView: View {
     @State private var apiKey = ""
     @State private var isKeyVisible = false
     @State private var isTesting = false
     @State private var testResult: TestResult?
+    @State private var showLogin = false
 
     enum TestResult: Equatable {
         case success(balance: String)
@@ -26,132 +23,133 @@ struct SettingsView: View {
                     HStack {
                         if isKeyVisible {
                             TextField("sk-...", text: $apiKey)
-                                .autocapitalization(.none)
-                                .disableAutocorrection(true)
+                                .autocapitalization(.none).disableAutocorrection(true)
                                 .font(.body.monospaced())
                         } else {
                             SecureField("sk-...", text: $apiKey)
-                                .autocapitalization(.none)
-                                .disableAutocorrection(true)
+                                .autocapitalization(.none).disableAutocorrection(true)
                                 .font(.body.monospaced())
                         }
-
-                        Button {
-                            isKeyVisible.toggle()
-                        } label: {
+                        Button { isKeyVisible.toggle() } label: {
                             Image(systemName: isKeyVisible ? "eye.slash" : "eye")
                                 .foregroundColor(.secondary)
                         }
                     }
+
+                    HStack(spacing: 12) {
+                        Button(action: saveKey) {
+                            Label("保存", systemImage: "square.and.arrow.down.fill")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                        Button(action: testConnection) {
+                            HStack {
+                                if isTesting { ProgressView().scaleEffect(0.7) }
+                                else { Image(systemName: "antenna.radiowaves.left.and.right") }
+                                Text("测试连接")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isTesting || apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
                 } header: {
-                    Text("DeepSeek API Key")
+                    Text("API Key")
                 } footer: {
-                    Text("去 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) 创建你的 API Key。Key 只会存储在你手机的钥匙串中，不会上传到任何地方。")
+                    Text("从 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) 获取。仅用于查询余额，不上传任何第三方。")
                 }
 
                 // ==================
-                // 操作按钮
+                // 平台登录（获取详细用量）
+                // ==================
+                Section {
+                    if KeychainManager.hasCookie {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                            Text("已登录")
+                            Spacer()
+                            Button("重新登录") { showLogin = true }
+                                .font(.caption)
+                        }
+                        Button(role: .destructive) {
+                            try? KeychainManager.deleteCookie()
+                        } label: {
+                            Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                    } else {
+                        Button { showLogin = true } label: {
+                            Label("登录 DeepSeek 平台", systemImage: "person.badge.key")
+                        }
+                    }
+                } header: {
+                    Text("用量详情")
+                } footer: {
+                    Text("登录后可以查看每日/每周/每月的 Token 消耗明细和费用曲线。Cookie 仅存储在你手机钥匙串中。")
+                }
+
+                // ==================
+                // 接口诊断
                 // ==================
                 Section {
                     Button {
-                        saveKey()
+                        // TODO: 自动抓取内部接口
                     } label: {
-                        HStack {
-                            Image(systemName: "square.and.arrow.down.fill")
-                            Text("保存")
-                        }
+                        Label("诊断接口", systemImage: "stethoscope")
                     }
-                    .disabled(apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                    Button {
-                        testConnection()
-                    } label: {
-                        HStack {
-                            if isTesting {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "antenna.radiowaves.left.and.right")
-                            }
-                            Text("测试连接")
-                        }
-                    }
-                    .disabled(isTesting || apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                    if KeychainManager.hasKey {
-                        Button(role: .destructive) {
-                            deleteKey()
-                        } label: {
-                            HStack {
-                                Image(systemName: "trash")
-                                Text("删除已保存的 Key")
-                            }
-                        }
-                    }
+                    .disabled(!KeychainManager.hasCookie)
+                } header: {
+                    Text("高级")
+                } footer: {
+                    Text("当深求索平台改版导致接口变动时，点击此按钮自动抓取新的接口地址。")
                 }
 
                 // ==================
                 // 测试结果
                 // ==================
-                if let result = testResult {
+                if let r = testResult {
                     Section {
-                        switch result {
-                        case .success(let balance):
+                        switch r {
+                        case .success(let b):
                             HStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
-                                Text("连接成功 — 余额 \(balance)")
-                                    .foregroundColor(.green)
+                                Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                                Text("连接成功 — 余额 \(b)").foregroundColor(.green)
                             }
-                        case .failure(let msg):
+                        case .failure(let m):
                             HStack {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.red)
-                                Text(msg)
-                                    .foregroundColor(.red)
+                                Image(systemName: "xmark.circle.fill").foregroundColor(.red)
+                                Text(m).foregroundColor(.red)
                             }
                         }
                     }
                 }
 
                 // ==================
-                // 工作原理
+                // 关于
                 // ==================
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("📡 工作原理")
-                            .font(.subheadline.bold())
-
-                        Text("""
-                        本 App 直接调用 DeepSeek 官方 API：
-
-                        GET https://api.deepseek.com/user/balance
-
-                        每次刷新时，App 用你填入的 API Key 去查余额，然后把结果存到你手机上。对比前后两次余额的差值，就能算出你花了多少钱。
-
-                        全程不走任何第三方服务器。
-                        """)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                } header: {
-                    Text("关于")
-                }
-
                 Section {
                     HStack {
                         Text("版本")
                         Spacer()
                         Text("1.0.0").foregroundColor(.secondary)
                     }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("数据来源")
+                            .font(.subheadline)
+                        Text("余额：api.deepseek.com/user/balance（API Key）\n用量：platform.deepseek.com 内部接口（登录 Cookie）")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                } header: {
+                    Text("关于")
                 }
             }
             .navigationTitle("设置")
             .onAppear {
-                if apiKey.isEmpty, let saved = KeychainManager.load() {
+                if apiKey.isEmpty, let saved = KeychainManager.loadAPIKey() {
                     apiKey = saved
                 }
+            }
+            .sheet(isPresented: $showLogin) {
+                LoginView()
             }
         }
     }
@@ -159,44 +157,26 @@ struct SettingsView: View {
     // MARK: - 操作
 
     private func saveKey() {
-        let trimmed = apiKey.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-
-        do {
-            try KeychainManager.save(key: trimmed)
-            testResult = .success(balance: "Key 已保存")
-        } catch {
-            testResult = .failure("保存失败: \(error.localizedDescription)")
-        }
+        let t = apiKey.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return }
+        do { try KeychainManager.saveAPIKey(t); testResult = .success(balance: "Key 已保存") }
+        catch { testResult = .failure(error.localizedDescription) }
     }
 
     private func testConnection() {
-        let trimmed = apiKey.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-
-        isTesting = true
-        testResult = nil
-
+        let t = apiKey.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return }
+        isTesting = true; testResult = nil
         Task {
             do {
-                let resp = try await DeepSeekAPI.validateKey(trimmed)
-                if let info = resp.balanceInfos.first {
-                    testResult = .success(balance: info.formattedTotal)
-                    // 顺便保存
-                    try? KeychainManager.save(key: trimmed)
-                } else {
-                    testResult = .success(balance: "OK")
-                }
+                let r = try await DeepSeekAPI.validateKey(t)
+                let b = r.balanceInfos.first?.formattedTotal ?? "OK"
+                testResult = .success(balance: b)
+                try? KeychainManager.saveAPIKey(t)
             } catch {
                 testResult = .failure(error.localizedDescription)
             }
             isTesting = false
         }
-    }
-
-    private func deleteKey() {
-        try? KeychainManager.delete()
-        apiKey = ""
-        testResult = nil
     }
 }

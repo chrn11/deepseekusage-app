@@ -1,27 +1,15 @@
 import Foundation
 import Security
 
-/// 钥匙串管理器 — 安全存储 DeepSeek API Key
-///
-/// Keychain 是 iOS 系统级的安全存储，数据加密存储在设备上。
-/// 即使 App 被删除重装（如果使用此访问组），数据也不会丢失。
+/// 钥匙串管理器 — 安全存储 API Key 和平台 Cookie
 enum KeychainManager {
 
     private static let service = "com.deepseekusage.app"
-    private static let account = "deepseek_api_key"
 
-    // MARK: - 保存
+    // MARK: - 通用存储
 
-    static func save(key: String) throws {
-        guard !key.isEmpty else {
-            try delete()
-            return
-        }
-
-        let data = key.data(using: .utf8)!
-
-        // 先尝试删除旧的
-        try? delete()
+    private static func save(data: Data, account: String) throws {
+        try? delete(account: account)
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -37,9 +25,7 @@ enum KeychainManager {
         }
     }
 
-    // MARK: - 读取
-
-    static func load() -> String? {
+    private static func load(account: String) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -52,17 +38,11 @@ enum KeychainManager {
         let status = SecItemCopyMatching(query as CFDictionary, &item)
 
         guard status == errSecSuccess,
-              let data = item as? Data,
-              let key = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-
-        return key
+              let data = item as? Data else { return nil }
+        return data
     }
 
-    // MARK: - 删除
-
-    static func delete() throws {
+    private static func delete(account: String) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -75,11 +55,51 @@ enum KeychainManager {
         }
     }
 
-    // MARK: - 是否存在
+    // MARK: - API Key
 
-    static var hasKey: Bool {
-        load() != nil
+    private static let apiKeyAccount = "deepseek_api_key"
+
+    static func saveAPIKey(_ key: String) throws {
+        guard !key.isEmpty else { try deleteAPIKey(); return }
+        try save(data: key.data(using: .utf8)!, account: apiKeyAccount)
     }
+
+    static func loadAPIKey() -> String? {
+        guard let data = load(account: apiKeyAccount) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func deleteAPIKey() throws {
+        try delete(account: apiKeyAccount)
+    }
+
+    static var hasAPIKey: Bool { loadAPIKey() != nil }
+
+    // MARK: - 平台 Cookie（登录 platform.deepseek.com 后获取）
+
+    private static let cookieAccount = "deepseek_platform_cookie"
+
+    static func saveCookie(_ cookie: String) throws {
+        guard !cookie.isEmpty else { try deleteCookie(); return }
+        try save(data: cookie.data(using: .utf8)!, account: cookieAccount)
+    }
+
+    static func loadCookie() -> String? {
+        guard let data = load(account: cookieAccount) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func deleteCookie() throws {
+        try delete(account: cookieAccount)
+    }
+
+    static var hasCookie: Bool { loadCookie() != nil }
+
+    // 兼容旧方法名
+    static func save(key: String) throws { try saveAPIKey(key) }
+    static func load() -> String? { loadAPIKey() }
+    static func delete() throws { try deleteAPIKey() }
+    static var hasKey: Bool { hasAPIKey }
 }
 
 enum KeychainError: LocalizedError {
@@ -88,8 +108,8 @@ enum KeychainError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .unableToSave(let s): return "保存 API Key 失败 (OSStatus: \(s))"
-        case .unableToDelete(let s): return "删除 API Key 失败 (OSStatus: \(s))"
+        case .unableToSave(let s): return "保存失败 (OSStatus: \(s))"
+        case .unableToDelete(let s): return "删除失败 (OSStatus: \(s))"
         }
     }
 }

@@ -3,42 +3,61 @@ import SwiftUI
 
 /// 仪表盘 ViewModel
 ///
-/// - 从钥匙串读取 API Key → 直接调 DeepSeek API
-/// - 余额快照存本地 JSON（SnapshotStore）
-/// - 通过余额差值推算每日消费
+/// 数据源：
+/// - API Key → DeepSeek 官方 /user/balance（实时余额）
+/// - Cookie → platform.deepseek.com 内部 API（每日/每周/每月用量）
 @MainActor
 final class DashboardViewModel: ObservableObject {
 
+    // MARK: - 余额（API Key）
     @Published var balance: BalanceInfo?
+
+    // MARK: - 平台用量（Cookie 登录后）
+    @Published var dailyAmounts: [DailyAmount] = []
+    @Published var dailyCosts: [DailyCost] = []
+    @Published var summary: UsageSummaryData?
+    @Published var isLoggedIn: Bool = false
+
+    // MARK: - 状态
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    /// 最近 30 天用量（由余额差值计算）
+    // MARK: - 本地余额快照
+    private let store = SnapshotStore.shared
     @Published var dailyStats: [DailyUsageStat] = []
-
-    /// 今日 / 本周 / 本月消费
     @Published var todaySpend: Double = 0
     @Published var weekSpend: Double = 0
     @Published var monthSpend: Double = 0
 
-    private let store = SnapshotStore.shared
+    /// 本周 Token 用量（平台接口有则用接口，否则估算）
+    @Published var weekTokens: Int = 0
+    @Published var monthTokens: Int = 0
 
-    // MARK: - 加载
+    // MARK: - 加载所有数据
 
-    func loadData() async {
-        guard KeychainManager.hasKey else {
-            errorMessage = "请先在设置中填入 DeepSeek API Key"
-            return
-        }
-
+    func loadAll() async {
+        isLoggedIn = KeychainManager.hasCookie
         isLoading = true
         errorMessage = nil
+
+        // 并行加载
+        async let balanceTask: () = loadBalance()
+        async let platformTask: () = loadPlatformData()
+
+        _ = await (balanceTask, platformTask)
+        calculateStats()
+        isLoading = false
+    }
+
+    // MARK: - 余额
+
+    private func loadBalance() async {
+        guard KeychainManager.hasAPIKey else { return }
 
         do {
             let resp = try await DeepSeekAPI.fetchBalance()
             balance = resp.balanceInfos.first
 
-            // 存快照
             if let info = resp.balanceInfos.first {
                 store.add(BalanceSnapshot(
                     timestamp: Date(),
@@ -48,82 +67,97 @@ final class DashboardViewModel: ObservableObject {
                     currency: info.currency
                 ))
             }
-
-            calculateStats()
-
         } catch {
             errorMessage = error.localizedDescription
         }
-
-        isLoading = false
     }
 
-    // MARK: - 计算消费统计
+    // MARK: - 平台用量
+
+    private func loadPlatformData() async {
+        guard isLoggedIn else { return }
+
+        do {
+            // 注意：接口地址可能变化，"诊断"功能后续可以自动抓取
+            summary = try await PlatformAPI.fetchUsageSummary().data
+        } catch {
+            print("获取平台汇总失败: \(error)")
+        }
+
+        do {
+            dailyAmounts = try await PlatformAPI.fetchDailyAmount()
+        } catch {
+            print("获取每日用量失败: \(error)")
+        }
+
+        do {
+            dailyCosts = try await PlatformAPI.fetchDailyCost()
+        } catch {
+            print("获取每日费用失败: \(error)")
+        }
+    }
+
+    // MARK: - 计算统计
 
     func calculateStats() {
-        let snaps = store.snapshots
         let calendar = Calendar.current
         let now = Date()
-
-        guard snaps.count >= 2 else {
-            dailyStats = []
-            todaySpend = 0; weekSpend = 0; monthSpend = 0
-            return
-        }
-
-        // 按天分组，每天取最早和最后一次快照
-        let grouped = Dictionary(grouping: snaps) { $0.dateOnly }
-            .sorted { $0.key < $1.key }
-
-        var stats: [DailyUsageStat] = []
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd"
-
-        for (date, daySnapshots) in grouped {
-            guard let first = daySnapshots.first,
-                  let last = daySnapshots.last,
-                  first.totalBalance > last.totalBalance else { continue }
-
-            let spend = first.totalBalance - last.totalBalance
-
-            stats.append(DailyUsageStat(
-                id: df.string(from: date),
-                date: date,
-                spend: spend
-            ))
-        }
-
-        // 只保留最近 30 天
-        let cutoff = calendar.date(byAdding: .day, value: -30, to: now) ?? now
-        dailyStats = stats.filter { $0.date >= cutoff }
-
-        // 今日
         let todayStart = calendar.startOfDay(for: now)
-        todaySpend = dailyStats.first(where: { calendar.isDate($0.date, inSameDayAs: todayStart) })?.spend ?? 0
-
-        // 本月
-        monthSpend = dailyStats
-            .filter { calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
-            .map(\.spend).reduce(0, +)
-
-        // 本周
         let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
-        weekSpend = dailyStats
-            .filter { $0.date >= weekStart }
-            .map(\.spend).reduce(0, +)
+        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
+
+        // ---- 如果有平台接口数据，优先用 ----
+        if !dailyCosts.isEmpty {
+            let df = DateFormatter()
+            df.dateFormat = "yyyy-MM-dd"
+
+            todaySpend = dailyCosts.filter { $0.date == df.string(from: now) }.map(\.cost).reduce(0, +)
+            weekSpend  = dailyCosts.filter { c in
+                guard let d = df.date(from: c.date) else { return false }
+                return d >= weekStart
+            }.map(\.cost).reduce(0, +)
+            monthSpend = dailyCosts.filter { c in
+                guard let d = df.date(from: c.date) else { return false }
+                return d >= monthStart
+            }.map(\.cost).reduce(0, +)
+        }
+
+        if !dailyAmounts.isEmpty {
+            let df = DateFormatter()
+            df.dateFormat = "yyyy-MM-dd"
+
+            weekTokens  = dailyAmounts.filter { a in
+                guard let d = df.date(from: a.date) else { return false }
+                return d >= weekStart
+            }.map(\.totalTokens).reduce(0, +)
+            monthTokens = dailyAmounts.filter { a in
+                guard let d = df.date(from: a.date) else { return false }
+                return d >= monthStart
+            }.map(\.totalTokens).reduce(0, +)
+        } else {
+            weekTokens  = summary?.totalTokensThisMonth ?? 0
+            monthTokens = summary?.totalTokensThisMonth ?? 0
+        }
     }
 
     // MARK: - 格式化
 
-    var formattedTodaySpend: String {
-        String(format: "¥%.2f", todaySpend)
+    var formattedTodaySpend: String   { String(format: "¥%.2f", todaySpend) }
+    var formattedWeekSpend: String    { String(format: "¥%.2f", weekSpend) }
+    var formattedMonthSpend: String   { String(format: "¥%.2f", monthSpend) }
+
+    var formattedWeekTokens: String {
+        weekTokens >= 1_000_000 ? String(format: "%.1fM", Double(weekTokens) / 1_000_000) :
+        weekTokens >= 1_000     ? String(format: "%.0fK", Double(weekTokens) / 1_000) :
+        "\(weekTokens)"
     }
 
-    var formattedWeekSpend: String {
-        String(format: "¥%.2f", weekSpend)
+    var formattedMonthTokens: String {
+        monthTokens >= 1_000_000 ? String(format: "%.1fM", Double(monthTokens) / 1_000_000) :
+        monthTokens >= 1_000     ? String(format: "%.0fK", Double(monthTokens) / 1_000) :
+        "\(monthTokens)"
     }
 
-    var formattedMonthSpend: String {
-        String(format: "¥%.2f", monthSpend)
-    }
+    /// 月调用次数
+    var monthCalls: Int { summary?.totalCallsThisMonth ?? 0 }
 }
