@@ -2,62 +2,71 @@ import Foundation
 import SwiftUI
 
 /// 仪表盘 ViewModel
-///
-/// 数据源：
-/// - API Key → DeepSeek 官方 /user/balance（实时余额）
-/// - Cookie → platform.deepseek.com 内部 API（每日/每周/每月用量）
 @MainActor
 final class DashboardViewModel: ObservableObject {
 
-    // MARK: - 余额（API Key）
+    // MARK: - 余额
     @Published var balance: BalanceInfo?
 
-    // MARK: - 平台用量（Cookie 登录后）
-    @Published var dailyAmounts: [DailyAmount] = []
-    @Published var dailyCosts: [DailyCost] = []
+    // MARK: - 平台用量（全量原始数据）
+    @Published var allAmounts: [DailyAmount] = []
+    @Published var allCosts: [DailyCost] = []
     @Published var summary: UsageSummaryData?
     @Published var isLoggedIn: Bool = false
+
+    // MARK: - 月份选择
+    @Published var selectedMonth: YearMonth = YearMonth.current
+    @Published var availableMonths: [YearMonth] = []
+
+    // MARK: - 当月过滤后的数据
+    var filteredCosts: [DailyCost] {
+        allCosts.filter { YearMonth(from: $0.date) == selectedMonth }
+    }
+    var filteredAmounts: [DailyAmount] {
+        allAmounts.filter { YearMonth(from: $0.date) == selectedMonth }
+    }
+
+    // MARK: - 当月统计
+    var monthSpend: Double { filteredCosts.map(\.cost).reduce(0, +) }
+    var monthTokens: Int { filteredAmounts.map(\.totalTokens).reduce(0, +) }
+    var monthCalls: Int {
+        selectedMonth == YearMonth.current ? (summary?.totalCallsThisMonth ?? 0) : 0
+    }
+
+    // MARK: - 今日 / 本周
+    @Published var todaySpend: Double = 0
+    @Published var weekSpend: Double = 0
+    @Published var weekTokens: Int = 0
 
     // MARK: - 状态
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    // MARK: - 本地余额快照
+    // MARK: - 本地快照
     private let store = SnapshotStore.shared
     @Published var dailyStats: [DailyUsageStat] = []
-    @Published var todaySpend: Double = 0
-    @Published var weekSpend: Double = 0
-    @Published var monthSpend: Double = 0
 
-    /// 本周 Token 用量（平台接口有则用接口，否则估算）
-    @Published var weekTokens: Int = 0
-    @Published var monthTokens: Int = 0
-
-    // MARK: - 加载所有数据
+    // MARK: - 加载
 
     func loadAll() async {
         isLoggedIn = KeychainManager.hasCookie
         isLoading = true
         errorMessage = nil
 
-        // 并行加载
         async let balanceTask: () = loadBalance()
         async let platformTask: () = loadPlatformData()
 
         _ = await (balanceTask, platformTask)
+        refreshAvailableMonths()
         calculateStats()
         isLoading = false
     }
 
-    // MARK: - 余额
-
     private func loadBalance() async {
         guard KeychainManager.hasAPIKey else { return }
-
         do {
             let resp = try await DeepSeekAPI.fetchBalance()
             balance = resp.balanceInfos.first
-
             if let info = resp.balanceInfos.first {
                 store.add(BalanceSnapshot(
                     timestamp: Date(),
@@ -72,29 +81,45 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 平台用量
-
     private func loadPlatformData() async {
         guard isLoggedIn else { return }
+        do { summary = try await PlatformAPI.fetchUsageSummary().data }
+        catch { print("获取汇总失败: \(error)") }
 
-        do {
-            // 注意：接口地址可能变化，"诊断"功能后续可以自动抓取
-            summary = try await PlatformAPI.fetchUsageSummary().data
-        } catch {
-            print("获取平台汇总失败: \(error)")
-        }
+        do { allAmounts = try await PlatformAPI.fetchDailyAmount() }
+        catch { print("获取用量失败: \(error)") }
 
-        do {
-            dailyAmounts = try await PlatformAPI.fetchDailyAmount()
-        } catch {
-            print("获取每日用量失败: \(error)")
-        }
+        do { allCosts = try await PlatformAPI.fetchDailyCost() }
+        catch { print("获取费用失败: \(error)") }
+    }
 
-        do {
-            dailyCosts = try await PlatformAPI.fetchDailyCost()
-        } catch {
-            print("获取每日费用失败: \(error)")
+    // MARK: - 月份管理
+
+    func refreshAvailableMonths() {
+        let ymSet = Set(allCosts.map { YearMonth(from: $0.date) })
+        availableMonths = ymSet.sorted(by: >)
+        // 如果还没选过或是旧数据，默认当前月
+        if availableMonths.first == YearMonth.current {
+            selectedMonth = YearMonth.current
         }
+    }
+
+    func previousMonth() {
+        guard let idx = availableMonths.firstIndex(of: selectedMonth),
+              idx + 1 < availableMonths.count else { return }
+        selectedMonth = availableMonths[idx + 1]
+        calculateStats()
+    }
+
+    func nextMonth() {
+        guard let idx = availableMonths.firstIndex(of: selectedMonth), idx > 0 else { return }
+        selectedMonth = availableMonths[idx - 1]
+        calculateStats()
+    }
+
+    func goToCurrentMonth() {
+        selectedMonth = YearMonth.current
+        calculateStats()
     }
 
     // MARK: - 计算统计
@@ -102,62 +127,69 @@ final class DashboardViewModel: ObservableObject {
     func calculateStats() {
         let calendar = Calendar.current
         let now = Date()
-        let todayStart = calendar.startOfDay(for: now)
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+
+        todaySpend = allCosts.filter { $0.date == df.string(from: now) }.map(\.cost).reduce(0, +)
+
         let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
-        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
+        weekSpend = allCosts.filter { c in
+            guard let d = df.date(from: c.date) else { return false }
+            return d >= weekStart
+        }.map(\.cost).reduce(0, +)
 
-        // ---- 如果有平台接口数据，优先用 ----
-        if !dailyCosts.isEmpty {
-            let df = DateFormatter()
-            df.dateFormat = "yyyy-MM-dd"
-
-            todaySpend = dailyCosts.filter { $0.date == df.string(from: now) }.map(\.cost).reduce(0, +)
-            weekSpend  = dailyCosts.filter { c in
-                guard let d = df.date(from: c.date) else { return false }
-                return d >= weekStart
-            }.map(\.cost).reduce(0, +)
-            monthSpend = dailyCosts.filter { c in
-                guard let d = df.date(from: c.date) else { return false }
-                return d >= monthStart
-            }.map(\.cost).reduce(0, +)
-        }
-
-        if !dailyAmounts.isEmpty {
-            let df = DateFormatter()
-            df.dateFormat = "yyyy-MM-dd"
-
-            weekTokens  = dailyAmounts.filter { a in
-                guard let d = df.date(from: a.date) else { return false }
-                return d >= weekStart
-            }.map(\.totalTokens).reduce(0, +)
-            monthTokens = dailyAmounts.filter { a in
-                guard let d = df.date(from: a.date) else { return false }
-                return d >= monthStart
-            }.map(\.totalTokens).reduce(0, +)
-        } else {
-            weekTokens  = summary?.totalTokensThisMonth ?? 0
-            monthTokens = summary?.totalTokensThisMonth ?? 0
-        }
+        weekTokens = allAmounts.filter { a in
+            guard let d = df.date(from: a.date) else { return false }
+            return d >= weekStart
+        }.map(\.totalTokens).reduce(0, +)
     }
 
     // MARK: - 格式化
 
-    var formattedTodaySpend: String   { String(format: "¥%.2f", todaySpend) }
-    var formattedWeekSpend: String    { String(format: "¥%.2f", weekSpend) }
-    var formattedMonthSpend: String   { String(format: "¥%.2f", monthSpend) }
+    var formattedTodaySpend: String  { String(format: "¥%.2f", todaySpend) }
+    var formattedWeekSpend: String   { String(format: "¥%.2f", weekSpend) }
+    var formattedMonthSpend: String  { String(format: "¥%.2f", monthSpend) }
 
-    var formattedWeekTokens: String {
-        weekTokens >= 1_000_000 ? String(format: "%.1fM", Double(weekTokens) / 1_000_000) :
-        weekTokens >= 1_000     ? String(format: "%.0fK", Double(weekTokens) / 1_000) :
-        "\(weekTokens)"
+    var formattedWeekTokens: String  { formatToken(weekTokens) }
+    var formattedMonthTokens: String { formatToken(monthTokens) }
+
+    var selectedMonthLabel: String {
+        selectedMonth.label
     }
 
-    var formattedMonthTokens: String {
-        monthTokens >= 1_000_000 ? String(format: "%.1fM", Double(monthTokens) / 1_000_000) :
-        monthTokens >= 1_000     ? String(format: "%.0fK", Double(monthTokens) / 1_000) :
-        "\(monthTokens)"
+    private func formatToken(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000     { return String(format: "%.0fK", Double(n) / 1_000) }
+        return "\(n)"
+    }
+}
+
+// MARK: - YearMonth 工具
+
+struct YearMonth: Equatable, Hashable, Comparable {
+    let year: Int
+    let month: Int
+
+    static var current: YearMonth {
+        let c = Calendar.current.dateComponents([.year, .month], from: Date())
+        return YearMonth(year: c.year ?? 2026, month: c.month ?? 1)
     }
 
-    /// 月调用次数
-    var monthCalls: Int { summary?.totalCallsThisMonth ?? 0 }
+    /// "2026-06-05" → YearMonth(2026, 6)
+    init(from dateStr: String) {
+        let parts = dateStr.split(separator: "-").prefix(2)
+        self.year = parts.count >= 1 ? Int(parts[0]) ?? 2026 : 2026
+        self.month = parts.count >= 2 ? Int(parts[1]) ?? 1 : 1
+    }
+
+    init(year: Int, month: Int) { self.year = year; self.month = month }
+
+    var label: String {
+        let names = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"]
+        return "\(year)年 \(names[month - 1])"
+    }
+
+    static func < (lhs: YearMonth, rhs: YearMonth) -> Bool {
+        lhs.year < rhs.year || (lhs.year == rhs.year && lhs.month < rhs.month)
+    }
 }

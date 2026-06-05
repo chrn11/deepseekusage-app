@@ -18,7 +18,8 @@ struct DashboardView: View {
                     headerSection
                     balanceHero
                     statGrid
-                    if !vm.dailyCosts.isEmpty { usageChart }
+                    if vm.isLoggedIn { monthPicker }
+                    if !vm.filteredCosts.isEmpty { usageChart }
                     if !vm.isLoggedIn { loginPrompt }
                 }
                 .padding(.horizontal, 16)
@@ -212,46 +213,20 @@ struct DashboardView: View {
 
     private var statGrid: some View {
         LazyVGrid(columns: [.init(.flexible()), .init(.flexible()), .init(.flexible())], spacing: 10) {
-            GlassStatCard(
-                title: "今日",
-                value: vm.formattedTodaySpend,
-                icon: "clock",
-                color: Color(hex: "FF6B6B")
-            )
-            GlassStatCard(
-                title: "本周",
-                value: vm.formattedWeekSpend,
-                icon: "calendar.badge.clock",
-                color: Color(hex: "00C6FF")
-            )
-            GlassStatCard(
-                title: "本月",
-                value: vm.formattedMonthSpend,
-                icon: "calendar",
-                color: Color(hex: "7C5CFC")
-            )
+            GlassStatCard(title: "今日",   value: vm.formattedTodaySpend, icon: "clock",                color: Color(hex: "FF6B6B"))
+            GlassStatCard(title: "本周",   value: vm.formattedWeekSpend,  icon: "calendar.badge.clock", color: Color(hex: "00C6FF"))
+            GlassStatCard(title: monthCardLabel, value: vm.formattedMonthSpend, icon: "calendar", color: Color(hex: "7C5CFC"))
 
-            if vm.isLoggedIn && vm.weekTokens > 0 {
-                GlassStatCard(
-                    title: "周Token",
-                    value: vm.formattedWeekTokens,
-                    icon: "text.word.spacing",
-                    color: Color(hex: "00E6A0")
-                )
-                GlassStatCard(
-                    title: "月Token",
-                    value: vm.formattedMonthTokens,
-                    icon: "text.alignleft",
-                    color: Color(hex: "00C6FF")
-                )
-                GlassStatCard(
-                    title: "调用",
-                    value: "\(vm.monthCalls)次",
-                    icon: "arrow.up.message",
-                    color: Color(hex: "7C5CFC")
-                )
+            if vm.isLoggedIn {
+                GlassStatCard(title: "周Token", value: vm.formattedWeekTokens,  icon: "text.word.spacing", color: Color(hex: "00E6A0"))
+                GlassStatCard(title: "月Token", value: vm.formattedMonthTokens, icon: "text.alignleft",   color: Color(hex: "00C6FF"))
+                GlassStatCard(title: "调用",     value: "\(vm.monthCalls)次",   icon: "arrow.up.message", color: Color(hex: "7C5CFC"))
             }
         }
+    }
+
+    private var monthCardLabel: String {
+        vm.selectedMonth == YearMonth.current ? "本月" : "\(vm.selectedMonth.month)月"
     }
 
     // MARK: - 趋势图
@@ -275,7 +250,7 @@ struct DashboardView: View {
             .padding(.horizontal, 16)
             .padding(.top, 16)
 
-            Chart(vm.dailyCosts) { item in
+            Chart(vm.filteredCosts) { item in
                 BarMark(
                     x: .value("日期", item.formattedDate),
                     y: .value("消费", item.cost)
@@ -319,6 +294,52 @@ struct DashboardView: View {
                         .stroke(.white.opacity(0.06), lineWidth: 1)
                 )
         )
+    }
+
+    // MARK: - 月份选择器
+
+    private var monthPicker: some View {
+        HStack(spacing: 0) {
+            Button { withAnimation { vm.previousMonth() } } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(canGoPrev ? Color(hex: "00C6FF") : Color(hex: "5A6A82").opacity(0.3))
+                    .frame(width: 36, height: 36)
+            }
+            .disabled(!canGoPrev)
+
+            Text(vm.selectedMonthLabel)
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .foregroundColor(Color(hex: "E8EDF5"))
+                .frame(maxWidth: .infinity)
+
+            Button { withAnimation { vm.nextMonth() } } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(canGoNext ? Color(hex: "00C6FF") : Color(hex: "5A6A82").opacity(0.3))
+                    .frame(width: 36, height: 36)
+            }
+            .disabled(!canGoNext)
+        }
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(hex: "0A1228").opacity(0.6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color(hex: "00C6FF").opacity(0.12), lineWidth: 1)
+                )
+        )
+    }
+
+    private var canGoPrev: Bool {
+        guard let idx = vm.availableMonths.firstIndex(of: vm.selectedMonth) else { return false }
+        return idx + 1 < vm.availableMonths.count
+    }
+
+    private var canGoNext: Bool {
+        guard let idx = vm.availableMonths.firstIndex(of: vm.selectedMonth) else { return false }
+        return idx > 0
     }
 
     // MARK: - 登录引导
