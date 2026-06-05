@@ -2,63 +2,66 @@ import Foundation
 import SwiftUI
 import UserNotifications
 
-/// 仪表盘 ViewModel
 @MainActor
 final class DashboardViewModel: ObservableObject {
 
     // MARK: - 余额
     @Published var balance: BalanceInfo?
+    @Published var summary: SummaryData?
 
     // MARK: - 平台用量
-    @Published var allAmounts: [DailyAmount] = []
-    @Published var allCosts: [DailyCost] = []
-    @Published var summary: UsageSummaryData?
     @Published var isLoggedIn: Bool = false
-
-    // MARK: - 月份
-    @Published var selectedMonth: YearMonth = YearMonth.current
+    @Published var allAmounts: [DayAmount] = []
+    @Published var allCosts: [DayAmount] = []
+    @Published var currentYear: Int
+    @Published var currentMonth: Int
     @Published var availableMonths: [YearMonth] = []
 
-    var filteredCosts: [DailyCost]    { allCosts.filter { YearMonth(from: $0.date) == selectedMonth } }
-    var filteredAmounts: [DailyAmount] { allAmounts.filter { YearMonth(from: $0.date) == selectedMonth } }
-
-    var monthSpend: Double { filteredCosts.map(\.cost).reduce(0, +) }
-    var monthTokens: Int { filteredAmounts.map(\.totalTokens).reduce(0, +) }
-    var monthCalls: Int { selectedMonth == YearMonth.current ? (summary?.totalCallsThisMonth ?? 0) : 0 }
-
-    // MARK: - 今日 / 本周
+    // MARK: - 统计
     @Published var todaySpend: Double = 0
     @Published var weekSpend: Double = 0
+    @Published var monthSpend: Double = 0
+    @Published var monthTokens: Int = 0
+    @Published var monthCalls: Int = 0
     @Published var weekTokens: Int = 0
 
-    // MARK: - 状态
     @Published var isLoading = false
     @Published var errorMessage: String?
-
-    // MARK: - 余额预警
-    var alertThreshold: Double {
-        get { UserDefaults.standard.double(forKey: "balance_alert_threshold") }
-        set { UserDefaults.standard.set(newValue, forKey: "balance_alert_threshold") }
+    @Published var alertThreshold: Double {
+        didSet { UserDefaults.standard.set(alertThreshold, forKey: "balance_alert_threshold") }
     }
     var alertEnabled: Bool { alertThreshold > 0 }
 
     private var lastAlertBalance: Double = -1
-    private let store = SnapshotStore.shared
-    @Published var dailyStats: [DailyUsageStat] = []
+    private var loadTask: Task<Void, Never>?
+
+    init() {
+        let now = Date()
+        let cal = Calendar.current
+        currentYear  = cal.component(.year, from: now)
+        currentMonth = cal.component(.month, from: now)
+        alertThreshold = UserDefaults.standard.double(forKey: "balance_alert_threshold")
+    }
 
     // MARK: - 加载
 
     func loadAll() async {
-        isLoggedIn = KeychainManager.hasCookie
-        isLoading = true; errorMessage = nil
+        isLoggedIn = KeychainManager.hasToken
+        loadTask?.cancel()
+        loadTask = Task {
+            isLoading = true; errorMessage = nil
 
-        async let bt: () = loadBalance()
-        async let pt: () = loadPlatformData()
-        _ = await (bt, pt)
-        refreshAvailableMonths()
-        calculateStats()
-        checkBalanceAlert()
-        isLoading = false
+            async let bt: () = loadBalance()
+            async let pt: () = loadPlatform()
+            _ = await (bt, pt)
+
+            if !Task.isCancelled {
+                computeStats()
+                checkAlert()
+                isLoading = false
+            }
+        }
+        _ = await loadTask?.value
     }
 
     private func loadBalance() async {
@@ -66,165 +69,230 @@ final class DashboardViewModel: ObservableObject {
         do {
             let resp = try await DeepSeekAPI.fetchBalance()
             balance = resp.balanceInfos.first
-            if let info = resp.balanceInfos.first {
-                store.add(BalanceSnapshot(
-                    timestamp: Date(),
-                    totalBalance: info.totalBalanceValue,
-                    grantedBalance: info.grantedBalanceValue,
-                    toppedUpBalance: info.toppedUpBalanceValue,
-                    currency: info.currency
-                ))
-            }
         } catch {
             let ns = error as NSError
-            // NSURLErrorCancelled (-999): 刷新时前一个任务取消，无需报错
             if ns.domain == NSURLErrorDomain && ns.code == -999 { return }
             errorMessage = error.localizedDescription
         }
     }
 
-    private func loadPlatformData() async {
+    private func loadPlatform() async {
         guard isLoggedIn else { return }
-        do { summary = try await PlatformAPI.fetchUsageSummary().data } catch { print("summary: \(error)") }
-        do { allAmounts = try await PlatformAPI.fetchDailyAmount() }     catch { print("amount: \(error)") }
-        do { allCosts   = try await PlatformAPI.fetchDailyCost() }       catch { print("cost: \(error)") }
+
+        // 汇总
+        do { summary = try await PlatformAPI.fetchUsageSummary() }
+        catch { print("summary: \(error)") }
+
+        // 用量 (当前月)
+        do {
+            let data = try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear)
+            allAmounts = data.days ?? []
+        } catch { print("amount: \(error)") }
+
+        // 费用 (当前月)
+        do {
+            let data = try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear)
+            allCosts = data.days ?? []
+        } catch { print("cost: \(error)") }
+
+        refreshAvailableMonths()
     }
 
-    // MARK: - 月份
+    // MARK: - 月份切换
 
     func refreshAvailableMonths() {
-        let ym = Set(allCosts.map { YearMonth(from: $0.date) })
-        availableMonths = ym.sorted(by: >)
-        if availableMonths.first == YearMonth.current { selectedMonth = YearMonth.current }
+        var m = YearMonth(year: currentYear, month: currentMonth)
+        var r: [YearMonth] = []
+        for _ in 0..<18 { r.append(m); m = m.previous() }
+        availableMonths = r
     }
 
-    func previousMonth() {
-        guard let i = availableMonths.firstIndex(of: selectedMonth), i + 1 < availableMonths.count else { return }
-        selectedMonth = availableMonths[i + 1]; calculateStats()
-    }
-    func nextMonth() {
-        guard let i = availableMonths.firstIndex(of: selectedMonth), i > 0 else { return }
-        selectedMonth = availableMonths[i - 1]; calculateStats()
-    }
+    var selectedYM: YearMonth { YearMonth(year: currentYear, month: currentMonth) }
 
-    // MARK: - 统计
-
-    func calculateStats() {
-        let cal = Calendar.current; let now = Date(); let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
-        todaySpend = allCosts.filter { $0.date == df.string(from: now) }.map(\.cost).reduce(0, +)
-        let ws = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
-        weekSpend  = allCosts.filter { c in guard let d = df.date(from: c.date) else { return false }; return d >= ws }.map(\.cost).reduce(0, +)
-        weekTokens = allAmounts.filter { a in guard let d = df.date(from: a.date) else { return false }; return d >= ws }.map(\.totalTokens).reduce(0, +)
-    }
-
-    // MARK: - 模型饼图
-
-    /// 按模型聚合当月用量
-    var modelBreakdown: [ModelShare] {
-        let grouped = Dictionary(grouping: filteredAmounts, by: \.modelDisplayName)
-        let total = Double(filteredAmounts.map(\.totalTokens).reduce(0, +))
-        return grouped.map { model, items in
-            let tokens = items.map(\.totalTokens).reduce(0, +)
-            let cost   = items.map(\.estimatedCost).reduce(0, +)
-            return ModelShare(model: model, tokens: tokens, cost: cost, fraction: total > 0 ? Double(tokens) / total : 0)
-        }.sorted { $0.tokens > $1.tokens }
-    }
-
-    // MARK: - I/O 日聚合
-
-    /// 按天聚合 I/O Token
-    var ioByDay: [IOPair] {
-        let grouped = Dictionary(grouping: filteredAmounts, by: \.date)
-        return grouped.map { date, items in
-            IOPair(date: date, input: items.map(\.inputTokens).reduce(0, +),
-                   output: items.map(\.outputTokens).reduce(0, +))
-        }.sorted { $0.date < $1.date }
-    }
-
-    // MARK: - 余额预警
-
-    func checkBalanceAlert() {
-        guard alertEnabled, let b = balance else { return }
-        let total = b.totalBalanceValue
-        if total <= alertThreshold && abs(total - lastAlertBalance) > 0.01 {
-            lastAlertBalance = total
-            sendLowBalanceNotification(balance: total, currency: b.currency)
+    func selectMonth(_ ym: YearMonth) {
+        currentYear = ym.year; currentMonth = ym.month
+        // 切月份需要重新拉数据
+        Task {
+            isLoading = true
+            do { allCosts   = (try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear)).days ?? [] }
+            catch { allCosts = [] }
+            do { allAmounts = (try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear)).days ?? [] }
+            catch { allAmounts = [] }
+            computeStats()
+            isLoading = false
         }
     }
 
-    private func sendLowBalanceNotification(balance: Double, currency: String) {
-        let sym = currency == "CNY" ? "¥" : "$"
-        let content = UNMutableNotificationContent()
-        content.title = "余额不足"
-        content.body = "当前余额 \(sym)\(String(format: "%.2f", balance))，低于预警线 \(sym)\(String(format: "%.2f", alertThreshold))"
-        content.sound = .default
-
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-        let request = UNNotificationRequest(identifier: "low_balance_\(Date().timeIntervalSince1970)",
-                                            content: content, trigger: trigger)
-        UNUserNotificationCenter.current().add(request)
+    var canGoPrev: Bool {
+        availableMonths.firstIndex(of: selectedYM).map { $0 + 1 < availableMonths.count } ?? false
+    }
+    var canGoNext: Bool {
+        availableMonths.firstIndex(of: selectedYM).map { $0 > 0 } ?? false
     }
 
-    // MARK: - 格式化
+    func previousMonth() {
+        guard let i = availableMonths.firstIndex(of: selectedYM), i + 1 < availableMonths.count else { return }
+        selectMonth(availableMonths[i + 1])
+    }
+
+    func nextMonth() {
+        guard let i = availableMonths.firstIndex(of: selectedYM), i > 0 else { return }
+        selectMonth(availableMonths[i - 1])
+    }
+
+    // MARK: - 计算
+
+    func computeStats() {
+        let cal = Calendar.current; let now = Date()
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+        let todayStr = df.string(from: now)
+        let weekStart = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
+
+        // 从费用数据算每日消费
+        var totalCost: Double = 0; var todayCost: Double = 0; var weekCost: Double = 0
+        var totalTokens: Int = 0; var weekT: Int = 0; var totalCalls: Int = 0
+
+        for day in allCosts {
+            guard let dayModels = day.data else { continue }
+            for m in dayModels {
+                for u in (m.usage ?? []) {
+                    let amt = Double(u.amount ?? "0") ?? 0
+                    totalCost += amt
+                    if day.date == todayStr { todayCost += amt }
+                    if let d = df.date(from: day.date ?? ""), d >= weekStart { weekCost += amt }
+                }
+            }
+        }
+
+        for day in allAmounts {
+            guard let dayModels = day.data else { continue }
+            for m in dayModels {
+                var dTokens = 0; var dCalls = 0
+                for u in (m.usage ?? []) {
+                    let t = u.type ?? ""
+                    let amt = Int(u.amount ?? "0") ?? 0
+                    if t == "REQUEST" { dCalls = amt }
+                    else { dTokens += amt }
+                }
+                totalTokens += dTokens; totalCalls += dCalls
+                if day.date == todayStr {
+                    // today part already handled above
+                }
+                if let d = df.date(from: day.date ?? ""), d >= weekStart {
+                    weekT += dTokens
+                }
+            }
+        }
+
+        todaySpend = todayCost
+        weekSpend = weekCost
+        monthSpend = totalCost
+        monthTokens = totalTokens
+        monthCalls = totalCalls
+        weekTokens = weekT
+
+        // fallback from summary
+        if totalCost == 0 { monthSpend = summary?.costCNY ?? summary?.costUSD ?? 0 }
+    }
+
+    // MARK: - 摘要
+
+    /// 模型份额（从 amounts 汇总所有天的数据）
+    var modelBreakdown: [ModelShare] {
+        var map: [String: (tokens: Int, cost: Double)] = [:]
+        for day in allAmounts {
+            guard let models = day.data else { continue }
+            for m in models {
+                let name = m.model ?? "Unknown"
+                var tk = 0
+                for u in (m.usage ?? []) {
+                    if u.type != "REQUEST" { tk += Int(u.amount ?? "0") ?? 0 }
+                }
+                if tk > 0 { map[name, default: (0, 0)].tokens += tk }
+            }
+        }
+        let total = Double(map.values.map(\.tokens).reduce(0, +))
+        return map.map { ModelShare(model: $0.key, tokens: $0.value.tokens, cost: 0, fraction: total > 0 ? Double($0.value.tokens) / total : 0) }
+            .sorted { $0.tokens > $1.tokens }
+    }
+
+    /// I/O 每日聚合
+    var ioByDay: [IOPair] {
+        allAmounts.compactMap { day in
+            guard let models = day.data else { return nil }
+            var input = 0; var output = 0
+            for m in models {
+                for u in (m.usage ?? []) {
+                    let t = u.type ?? ""; let a = Int(u.amount ?? "0") ?? 0
+                    if t.contains("RESPONSE") { output += a }
+                    else { input += a } // PROMPT_TOKEN, CACHE_HIT/MISS
+                }
+            }
+            return IOPair(date: day.date ?? "", input: input, output: output)
+        }.sorted { $0.date < $1.date }
+    }
+
+    /// 费用每日聚合
+    var costByDay: [DailyCost] {
+        allCosts.compactMap { day in
+            guard let models = day.data else { return nil }
+            var total: Double = 0
+            for m in models {
+                for u in (m.usage ?? []) {
+                    total += Double(u.amount ?? "0") ?? 0
+                }
+            }
+            return DailyCost(date: day.date ?? "", cost: total)
+        }.sorted { $0.date < $1.date }
+    }
+
+    // MARK: - alert
+
+    func checkAlert() {
+        guard alertEnabled, let b = balance else { return }
+        let total = b.totalBalanceValue
+        if total <= alertThreshold, abs(total - lastAlertBalance) > 0.01 {
+            lastAlertBalance = total
+            let content = UNMutableNotificationContent()
+            content.title = "余额不足"
+            content.body = "¥\(String(format: "%.2f", total))，低于预警线 ¥\(String(format: "%.0f", alertThreshold))"
+            content.sound = .default
+            UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: "bal_\(Date().timeIntervalSince1970)", content: content, trigger: nil)
+            )
+        }
+    }
+
+    // MARK: - fmt
 
     var formattedTodaySpend: String  { String(format: "¥%.2f", todaySpend) }
     var formattedWeekSpend: String   { String(format: "¥%.2f", weekSpend) }
     var formattedMonthSpend: String  { String(format: "¥%.2f", monthSpend) }
-    var formattedWeekTokens: String  { fmtTok(weekTokens) }
-    var formattedMonthTokens: String { fmtTok(monthTokens) }
-    var selectedMonthLabel: String   { selectedMonth.label }
-    private func fmtTok(_ n: Int) -> String {
-        if n >= 1_000_000 { return String(format: "%.1fM", Double(n)/1_000_000) }
-        if n >= 1_000     { return String(format: "%.0fK", Double(n)/1_000) }
-        return "\(n)"
+    var formattedWeekTokens: String  { fmtN(weekTokens) }
+    var formattedMonthTokens: String { fmtN(monthTokens) }
+    var selectedMonthLabel: String   { selectedYM.label }
+    private func fmtN(_ n: Int) -> String {
+        n >= 1_000_000 ? String(format: "%.1fM", Double(n)/1_000_000)
+        : n >= 1_000   ? String(format: "%.0fK", Double(n)/1_000) : "\(n)"
     }
-}
-
-// MARK: - 模型份额
-
-struct ModelShare: Identifiable {
-    let id = UUID()
-    let model: String
-    let tokens: Int
-    let cost: Double
-    let fraction: Double
-
-    var pct: String { String(format: "%.0f%%", fraction * 100) }
-    var formattedTokens: String {
-        tokens >= 1_000_000 ? String(format: "%.1fM", Double(tokens)/1_000_000)
-        : tokens >= 1_000 ? String(format: "%.0fK", Double(tokens)/1_000)
-        : "\(tokens)"
-    }
-    var formattedCost: String { String(format: "¥%.2f", cost) }
-}
-
-// MARK: - I/O Pair
-
-struct IOPair: Identifiable {
-    let id = UUID()
-    let date: String
-    let input: Int
-    let output: Int
-    var shortDate: String { date.count >= 10 ? String(date.suffix(5)) : date }
 }
 
 // MARK: - YearMonth
 
 struct YearMonth: Equatable, Hashable, Comparable {
     let year, month: Int
-    static var current: YearMonth {
-        let c = Calendar.current.dateComponents([.year, .month], from: Date())
-        return YearMonth(year: c.year ?? 2026, month: c.month ?? 1)
-    }
-    init(from s: String) {
-        let p = s.split(separator: "-").prefix(2)
-        year = p.count >= 1 ? Int(p[0]) ?? 2026 : 2026
-        month = p.count >= 2 ? Int(p[1]) ?? 1 : 1
-    }
     init(year: Int, month: Int) { self.year = year; self.month = month }
+
     var label: String {
-        ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"][month - 1]
-        + " \(year)"
+        let names = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"]
+        return "\(year)年 \(names[month - 1])"
     }
-    static func < (l: YearMonth, r: YearMonth) -> Bool { l.year < r.year || (l.year == r.year && l.month < r.month) }
+
+    func previous() -> YearMonth {
+        month > 1 ? YearMonth(year: year, month: month - 1)
+                  : YearMonth(year: year - 1, month: 12)
+    }
+    static func < (l: YearMonth, r: YearMonth) -> Bool {
+        l.year < r.year || (l.year == r.year && l.month < r.month)
+    }
 }

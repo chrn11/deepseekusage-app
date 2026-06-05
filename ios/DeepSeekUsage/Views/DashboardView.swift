@@ -17,7 +17,7 @@ struct DashboardView: View {
                     if vm.isLoggedIn { monthSelector }
                     if !vm.modelBreakdown.isEmpty { modelChart }
                     if !vm.ioByDay.isEmpty      { ioChart }
-                    if !vm.filteredCosts.isEmpty { costChart }
+                    if !vm.costByDay.isEmpty { costChart }
                     if !vm.isLoggedIn { loginBanner }
                 }
                 .padding(.horizontal, 16)
@@ -269,8 +269,8 @@ struct DashboardView: View {
     // ═══════════════════════════════
 
     private var ioChart: some View {
-        let totalIn  = vm.filteredAmounts.map(\.inputTokens).reduce(0, +)
-        let totalOut = vm.filteredAmounts.map(\.outputTokens).reduce(0, +)
+        let totalIn  = vm.ioByDay.map(\.input).reduce(0, +)
+        let totalOut = vm.ioByDay.map(\.output).reduce(0, +)
         let totalAll = totalIn + totalOut
 
         return panel("Token 流量", nil) {
@@ -311,7 +311,7 @@ struct DashboardView: View {
     // ═══════════════════════════════
 
     private var costChart: some View {
-        let costs = vm.filteredCosts
+        let costs = vm.costByDay
         let total = costs.map(\.cost).reduce(0, +)
         let avg   = costs.isEmpty ? 0 : total / Double(costs.count)
         let peak  = costs.map(\.cost).max() ?? 0

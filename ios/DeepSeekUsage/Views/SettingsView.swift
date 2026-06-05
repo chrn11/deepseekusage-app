@@ -7,14 +7,10 @@ struct SettingsView: View {
     @State private var isTesting = false
     @State private var testResult: TestResult?
     @State private var showLogin = false
-    @State private var showDiagnosis = false
 
     // 余额预警
     @AppStorage("balance_alert_threshold") private var alertThreshold: Double = 0
     @State private var thresholdText = ""
-
-    // 接口诊断
-    @State private var diagResult: String?
 
     enum TestResult: Equatable {
         case success(balance: String)
@@ -30,8 +26,6 @@ struct SettingsView: View {
                     loginSection
                     currencySection
                     alertSection
-                    advancedSection
-                    if diagResult != nil { diagResultSection }
                     if let r = testResult { resultSection(r) }
                     aboutSection
                 }
@@ -46,7 +40,6 @@ struct SettingsView: View {
                 if thresholdText.isEmpty && alertThreshold > 0 { thresholdText = String(format: "%.0f", alertThreshold) }
             }
             .sheet(isPresented: $showLogin) { LoginView() }
-            .sheet(isPresented: $showDiagnosis) { DiagnosisView { result in diagResult = result } }
         }
     }
 
@@ -107,7 +100,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             secHead("person.badge.key.fill", "用量详情", "登录平台后获取 Token 消耗和费用曲线")
             VStack(spacing: 10) {
-                if KeychainManager.hasCookie {
+                if KeychainManager.hasToken {
                     HStack {
                         Circle().fill(Color(hex: "00E6A0")).frame(width: 8, height: 8)
                         Text("已登录").font(.system(size: 14, weight: .medium)).foregroundColor(Color(hex: "00E6A0"))
@@ -115,7 +108,7 @@ struct SettingsView: View {
                         Button("重新登录") { showLogin = true }.font(.system(size: 13)).foregroundColor(Color(hex: "00C6FF"))
                     }
                     .padding(12).background(Color(hex: "0A1228")).clipShape(RoundedRectangle(cornerRadius: 10))
-                    Button(role: .destructive) { try? KeychainManager.deleteCookie() } label: {
+                    Button(role: .destructive) { KeychainManager.logoutPlatform() } label: {
                         Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right").font(.system(size: 13))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 4)
@@ -208,56 +201,6 @@ struct SettingsView: View {
             .padding(14)
         }
         .background(secBg)
-    }
-
-    // MARK: 高级
-
-    private var advancedSection: some View {
-        VStack(spacing: 0) {
-            secHead("wrench.fill", "高级", "接口诊断 — 当平台改版导致数据异常时使用")
-            VStack(spacing: 10) {
-                Button {
-                    showDiagnosis = true
-                } label: {
-                    HStack {
-                        Image(systemName: "stethoscope").font(.system(size: 14))
-                        Text("诊断接口").font(.system(size: 13))
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.system(size: 11))
-                    }
-                    .foregroundColor(KeychainManager.hasCookie ? Color(hex: "00C6FF") : .white.opacity(0.2))
-                    .padding(14).background(Color(hex: "0A1228")).clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .disabled(!KeychainManager.hasCookie)
-
-                Button {
-                    PlatformAPI.resetEndpoints()
-                    diagResult = "已重置为默认接口"
-                } label: {
-                    HStack {
-                        Image(systemName: "arrow.counterclockwise").font(.system(size: 13))
-                        Text("重置为默认接口").font(.system(size: 13))
-                    }
-                    .foregroundColor(.white.opacity(0.3))
-                }
-                .padding(.bottom, 4)
-
-                Text("当 DeepSeek 平台改版导致数据异常时，点击「诊断接口」自动抓取新地址。")
-                    .font(.system(size: 10)).foregroundColor(Color(hex: "4A5A72"))
-            }
-            .padding(14)
-        }
-        .background(secBg)
-    }
-
-    // MARK: 诊断结果
-
-    private var diagResultSection: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill").foregroundColor(Color(hex: "00E6A0"))
-            Text(diagResult ?? "").foregroundColor(Color(hex: "00E6A0"))
-        }
-        .font(.system(size: 13)).padding(14).background(secBg)
     }
 
     // MARK: 测试结果

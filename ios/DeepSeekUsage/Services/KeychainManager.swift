@@ -75,7 +75,7 @@ enum KeychainManager {
 
     static var hasAPIKey: Bool { loadAPIKey() != nil }
 
-    // MARK: - 平台 Cookie（登录 platform.deepseek.com 后获取）
+    // MARK: - 平台 Cookie
 
     private static let cookieAccount = "deepseek_platform_cookie"
 
@@ -89,11 +89,32 @@ enum KeychainManager {
         return String(data: data, encoding: .utf8)
     }
 
-    static func deleteCookie() throws {
-        try delete(account: cookieAccount)
+    static func deleteCookie() throws { try delete(account: cookieAccount) }
+    static var hasCookie: Bool { loadCookie() != nil }
+
+    // MARK: - Bearer Token（登录返回的 auth token）
+
+    private static let tokenAccount = "deepseek_bearer_token"
+
+    static func saveToken(_ token: String) throws {
+        guard !token.isEmpty else { try deleteToken(); return }
+        try save(data: token.data(using: .utf8)!, account: tokenAccount)
     }
 
-    static var hasCookie: Bool { loadCookie() != nil }
+    static func loadToken() -> String? {
+        guard let data = load(account: tokenAccount) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func deleteToken() throws { try delete(account: tokenAccount) }
+    static var hasToken: Bool { loadToken() != nil }
+
+    // MARK: - 登录凭据一并清理
+
+    static func logoutPlatform() {
+        try? deleteCookie()
+        try? deleteToken()
+    }
 
     // 兼容旧方法名
     static func save(key: String) throws { try saveAPIKey(key) }
