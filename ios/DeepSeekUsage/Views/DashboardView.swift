@@ -189,22 +189,21 @@ struct DashboardView: View {
 
     private var modelPie: some View {
         chartBox(title: "模型用量占比", subtitle: "\(vm.modelBreakdown.count) 个模型") {
-            Chart(vm.modelBreakdown) { m in
-                SectorMark(angle: .value("Token", m.tokens),
-                           innerRadius: .ratio(0.55),
-                           angularInset: 2)
-                    .foregroundStyle(by: .value("模型", m.model))
-            }
-            .chartLegend(position: .bottom, alignment: .center, spacing: 8) {
-                ForEach(vm.modelBreakdown) { m in
-                    HStack(spacing: 4) {
-                        Circle().fill(modelColor(m.model)).frame(width: 8, height: 8)
-                        Text(m.model).font(.system(size: 11)).foregroundColor(Color(hex: "7B89A0"))
-                        Text(m.pct).font(.system(size: 10, weight: .bold)).foregroundColor(Color(hex: "5A6A82"))
+            VStack(spacing: 12) {
+                DonutChart(data: vm.modelBreakdown).frame(height: 160)
+                LazyVGrid(columns: [.init(.flexible()), .init(.flexible())], spacing: 6) {
+                    ForEach(vm.modelBreakdown) { m in
+                        HStack(spacing: 4) {
+                            Circle().fill(modelColor(m.model)).frame(width: 8, height: 8)
+                            Text(m.model).font(.system(size: 11)).foregroundColor(Color(hex: "7B89A0")).lineLimit(1)
+                            Text(m.pct).font(.system(size: 10, weight: .bold)).foregroundColor(Color(hex: "5A6A82"))
+                            Spacer()
+                        }
                     }
                 }
+                .padding(.horizontal, 8)
             }
-            .frame(height: 210)
+            .padding(.bottom, 12)
         }
     }
 
@@ -309,6 +308,40 @@ struct DashboardView: View {
         .background(RoundedRectangle(cornerRadius: 18)
             .fill(Color(hex: "0A1228").opacity(0.7))
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.06), lineWidth: 1)))
+    }
+}
+
+// MARK: - Canvas 饼图（iOS 16 兼容，SectorMark 仅 iOS 17+）
+
+struct DonutChart: View {
+    let data: [ModelShare]
+    private let colors: [Color] = [Color(hex: "00C6FF"), Color(hex: "7C5CFC"), Color(hex: "00E6A0"),
+                                    Color(hex: "FF6B6B"), Color(hex: "FFD93D"), Color(hex: "FF8C42"),
+                                    Color(hex: "C0A8FF"), Color(hex: "5CE1E6")]
+
+    var body: some View {
+        Canvas { ctx, size in
+            let total = data.map(\.tokens).reduce(0, +)
+            guard total > 0 else { return }
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let radius = min(size.width, size.height) / 2 * 0.75
+            let inner = radius * 0.55
+            var startAngle = -Double.pi / 2
+
+            for (i, m) in data.enumerated() {
+                let frac = Double(m.tokens) / Double(total)
+                let endAngle = startAngle + frac * 2 * .pi
+                let path = Path { p in
+                    p.addArc(center: center, radius: radius, startAngle: Angle(radians: startAngle),
+                             endAngle: Angle(radians: endAngle), clockwise: false)
+                    p.addArc(center: center, radius: inner, startAngle: Angle(radians: endAngle),
+                             endAngle: Angle(radians: startAngle), clockwise: true)
+                    p.closeSubpath()
+                }
+                ctx.fill(path, with: .color(colors[i % colors.count]))
+                startAngle = endAngle
+            }
+        }
     }
 }
 
