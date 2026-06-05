@@ -2,178 +2,201 @@ import SwiftUI
 
 /// 设置页面
 ///
-/// 配置项：
-/// - 后端服务器地址
-/// - API Key 状态（存储在服务器端，这里只显示状态）
-/// - 轮询间隔设置
+/// - 输入 / 管理 DeepSeek API Key（安全存储在 Keychain）
+/// - 测试连接
+/// - 版本信息
 struct SettingsView: View {
-    @AppStorage("backend_base_url") private var backendURL: String = "http://localhost:8080"
-    @State private var isEditingURL = false
-    @State private var editedURL = ""
+    @State private var apiKey = ""
+    @State private var isKeyVisible = false
+    @State private var isTesting = false
+    @State private var testResult: TestResult?
 
-    // 连接测试
-    @State private var isTestingConnection = false
-    @State private var connectionStatus: ConnectionStatus = .unknown
-
-    enum ConnectionStatus {
-        case unknown
-        case testing
-        case success
-        case failed(String)
+    enum TestResult: Equatable {
+        case success(balance: String)
+        case failure(String)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                // ---- 服务器配置 ----
+                // ==================
+                // API Key
+                // ==================
                 Section {
                     HStack {
-                        Text("后端地址")
-                        Spacer()
-                        if isEditingURL {
-                            TextField("http://your-server:8080", text: $editedURL)
-                                .multilineTextAlignment(.trailing)
-                                .keyboardType(.URL)
+                        if isKeyVisible {
+                            TextField("sk-...", text: $apiKey)
                                 .autocapitalization(.none)
                                 .disableAutocorrection(true)
-                                .foregroundColor(.secondary)
+                                .font(.body.monospaced())
                         } else {
-                            Text(backendURL)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                            SecureField("sk-...", text: $apiKey)
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                                .font(.body.monospaced())
                         }
-                    }
 
-                    if isEditingURL {
-                        Button("保存") {
-                            backendURL = editedURL
-                            APIClient.shared.configuredBaseURL = editedURL
-                            isEditingURL = false
+                        Button {
+                            isKeyVisible.toggle()
+                        } label: {
+                            Image(systemName: isKeyVisible ? "eye.slash" : "eye")
+                                .foregroundColor(.secondary)
                         }
-                        .frame(maxWidth: .infinity)
-                        .foregroundColor(.blue)
-                    } else {
-                        Button("修改") {
-                            editedURL = backendURL
-                            isEditingURL = true
-                        }
-                        .frame(maxWidth: .infinity)
                     }
                 } header: {
-                    Text("服务器配置")
+                    Text("DeepSeek API Key")
                 } footer: {
-                    Text("指向 Vapor 后端服务的地址。如果你在自己电脑上运行后端，使用 http://localhost:8080。如果是远程服务器，填入对应的 IP 或域名。")
+                    Text("去 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) 创建你的 API Key。Key 只会存储在你手机的钥匙串中，不会上传到任何地方。")
                 }
 
-                // ---- 连接测试 ----
+                // ==================
+                // 操作按钮
+                // ==================
                 Section {
-                    HStack {
-                        Button(action: testConnection) {
-                            HStack {
-                                Image(systemName: "antenna.radiowaves.left.and.right")
-                                Text("测试连接")
-                            }
+                    Button {
+                        saveKey()
+                    } label: {
+                        HStack {
+                            Image(systemName: "square.and.arrow.down.fill")
+                            Text("保存")
                         }
-                        .disabled(isTestingConnection)
+                    }
+                    .disabled(apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
 
-                        Spacer()
+                    Button {
+                        testConnection()
+                    } label: {
+                        HStack {
+                            if isTesting {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "antenna.radiowaves.left.and.right")
+                            }
+                            Text("测试连接")
+                        }
+                    }
+                    .disabled(isTesting || apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
 
-                        switch connectionStatus {
-                        case .unknown:
-                            EmptyView()
-                        case .testing:
-                            ProgressView()
-                        case .success:
-                            Label("连接成功", systemImage: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                                .font(.caption)
-                        case .failed(let msg):
-                            Label("连接失败: \(msg)", systemImage: "xmark.circle.fill")
-                                .foregroundColor(.red)
-                                .font(.caption)
+                    if KeychainManager.hasKey {
+                        Button(role: .destructive) {
+                            deleteKey()
+                        } label: {
+                            HStack {
+                                Image(systemName: "trash")
+                                Text("删除已保存的 Key")
+                            }
                         }
                     }
                 }
 
-                // ---- API Key 说明 ----
+                // ==================
+                // 测试结果
+                // ==================
+                if let result = testResult {
+                    Section {
+                        switch result {
+                        case .success(let balance):
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("连接成功 — 余额 \(balance)")
+                                    .foregroundColor(.green)
+                            }
+                        case .failure(let msg):
+                            HStack {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.red)
+                                Text(msg)
+                                    .foregroundColor(.red)
+                            }
+                        }
+                    }
+                }
+
+                // ==================
+                // 工作原理
+                // ==================
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Image(systemName: "key.fill")
-                                .foregroundColor(.orange)
-                            Text("DeepSeek API Key")
-                                .font(.headline)
-                        }
+                        Text("📡 工作原理")
+                            .font(.subheadline.bold())
 
-                        Text("API Key 配置在后端服务器上，不需要在 App 中填入。")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        Text("""
+                        本 App 直接调用 DeepSeek 官方 API：
 
-                        Text("启动后端时设置环境变量：")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 4)
+                        GET https://api.deepseek.com/user/balance
 
-                        Text("export DEEPSEEK_API_KEY=\"sk-your-key\"")
-                            .font(.caption.monospaced())
-                            .padding(8)
-                            .background(Color(.systemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        每次刷新时，App 用你填入的 API Key 去查余额，然后把结果存到你手机上。对比前后两次余额的差值，就能算出你花了多少钱。
+
+                        全程不走任何第三方服务器。
+                        """)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                     }
                     .padding(.vertical, 4)
                 } header: {
-                    Text("API Key")
+                    Text("关于")
                 }
 
-                // ---- 关于 ----
                 Section {
                     HStack {
                         Text("版本")
                         Spacer()
-                        Text("1.0.0")
-                            .foregroundColor(.secondary)
+                        Text("1.0.0").foregroundColor(.secondary)
                     }
-
-                    HStack {
-                        Text("数据来源")
-                        Spacer()
-                        Text("余额差值估算 + 代理转发记录")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                } header: {
-                    Text("关于")
-                } footer: {
-                    Text("DeepSeek Usage Tracker — 非官方 DeepSeek API 用量追踪工具\n后端采用 Vapor 4 + SwiftUI 原生 iOS 客户端")
                 }
             }
             .navigationTitle("设置")
+            .onAppear {
+                if apiKey.isEmpty, let saved = KeychainManager.load() {
+                    apiKey = saved
+                }
+            }
         }
     }
 
-    // MARK: - 连接测试
+    // MARK: - 操作
+
+    private func saveKey() {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+
+        do {
+            try KeychainManager.save(key: trimmed)
+            testResult = .success(balance: "Key 已保存")
+        } catch {
+            testResult = .failure("保存失败: \(error.localizedDescription)")
+        }
+    }
 
     private func testConnection() {
-        isTestingConnection = true
-        connectionStatus = .testing
+        let trimmed = apiKey.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+
+        isTesting = true
+        testResult = nil
 
         Task {
             do {
-                let url = URL(string: "\(backendURL)/health")!
-                let (_, response) = try await URLSession.shared.data(from: url)
-
-                if let httpResponse = response as? HTTPURLResponse,
-                   (200...299).contains(httpResponse.statusCode) {
-                    connectionStatus = .success
+                let resp = try await DeepSeekAPI.validateKey(trimmed)
+                if let info = resp.balanceInfos.first {
+                    testResult = .success(balance: info.formattedTotal)
+                    // 顺便保存
+                    try? KeychainManager.save(key: trimmed)
                 } else {
-                    connectionStatus = .failed("状态码: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                    testResult = .success(balance: "OK")
                 }
             } catch {
-                connectionStatus = .failed(error.localizedDescription)
+                testResult = .failure(error.localizedDescription)
             }
-
-            isTestingConnection = false
+            isTesting = false
         }
+    }
+
+    private func deleteKey() {
+        try? KeychainManager.delete()
+        apiKey = ""
+        testResult = nil
     }
 }

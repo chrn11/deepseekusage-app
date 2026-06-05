@@ -1,90 +1,72 @@
 # DeepSeek Usage Tracker
 
-全栈 DeepSeek API 用量追踪工具：**Vapor 4 后端** + **iOS SwiftUI 原生客户端**
+纯 iOS 原生 App — 追踪 DeepSeek API 用量和消费。
+
+**不需要后端服务器，不需要注册账号，App 直接调用 DeepSeek 官方 API。**
+
+## 怎么装
+
+1. Push 到 GitHub → Actions 自动编译 unsigned `.ipa`
+2. 下载后 TrollStore 安装
+3. 打开 App → 设置 → 填入 DeepSeek API Key
+4. 回仪表盘 → 下拉刷新 → 余额就出来了
+
+## 能看什么
+
+| 数据 | 来源 |
+|------|------|
+| 💰 实时余额 | `GET /user/balance` |
+| 📊 今日/本周/本月消费 | 余额差值推算 |
+| 📈 30 天趋势图 | 本地快照对比 |
+
+## 原理
 
 ```
-┌────────────────────┐         ┌──────────────────────┐
-│   iOS App          │  HTTP   │   Vapor Backend       │       ┌─────────────────┐
-│   (SwiftUI)        │◄───────►│   (Swift)             │◄─────►│  DeepSeek API   │
-│   TrollStore 安装   │         │   余额轮询 + 代理转发   │       │  /user/balance  │
-│                    │         │   SQLite 数据库         │       │  /chat/...      │
-└────────────────────┘         └──────────────────────┘       └─────────────────┘
+App 直接调 DeepSeek 官方 API 查余额
+      ↓
+存到手机本地 (SwiftData)
+      ↓
+对比上次查到的余额 → 差值就是消费
+      ↓
+柱状图展示每天花了多少钱
 ```
 
-## 快速开始
+**全程不走任何第三方服务器。**
 
-### 1. 启动后端
-
-```bash
-cd backend
-export DEEPSEEK_API_KEY="sk-your-deepseek-api-key"
-swift run
-# → http://localhost:8080
-```
-
-Docker 方式：
-```bash
-cd backend
-docker build -t deepseek-tracker .
-docker run -p 8080:8080 -e DEEPSEEK_API_KEY="sk-your-key" deepseek-tracker
-```
-
-### 2. 安装 iOS App
-
-**不需要 Mac！** Push 到 GitHub 后，Actions 自动编译 unsigned `.ipa`，下载后用 [TrollStore](https://github.com/opa334/TrollStore) 安装。
-
-详见 [ios/README.md](ios/README.md)
-
-## 项目结构
+## 文件结构
 
 ```
 deepseekusage-app/
-├── README.md
-├── ARCHITECTURE.md               ← 系统架构设计
-├── project.yml                   ← XcodeGen 配置（生成 Xcode 项目）
-├── .github/workflows/build.yml   ← GitHub Actions 自动编译 IPA
-│
-├── backend/                      ← Vapor 4 后端
-│   ├── Package.swift
-│   ├── Dockerfile
-│   └── Sources/App/
-│       ├── main.swift
-│       ├── configure.swift
-│       ├── Routes/Routes.swift
-│       ├── Models/               ← 3 个数据模型
-│       ├── Migrations/           ← 数据库迁移
-│       └── Services/             ← 余额轮询 / 代理转发 / 定价
-│
-└── ios/                          ← iOS SwiftUI 客户端
-    ├── README.md
-    ├── Info.plist
-    └── DeepSeekUsage/
-        ├── App/DeepSeekUsageApp.swift
-        ├── Models/               ← 3 个模型
-        ├── Services/APIClient.swift
-        ├── ViewModels/           ← MVVM ViewModels
-        └── Views/                ← 仪表盘 / 调用记录 / 设置
+├── ios/
+│   ├── Info.plist
+│   ├── README.md
+│   └── DeepSeekUsage/
+│       ├── App/DeepSeekUsageApp.swift
+│       ├── Models/
+│       │   ├── BalanceInfo.swift
+│       │   └── BalanceSnapshot.swift
+│       ├── Services/
+│       │   ├── DeepSeekAPI.swift
+│       │   └── KeychainManager.swift
+│       ├── ViewModels/
+│       │   └── DashboardViewModel.swift
+│       └── Views/
+│           ├── ContentView.swift
+│           ├── DashboardView.swift
+│           └── SettingsView.swift
+├── project.yml
+├── .github/workflows/build.yml
+└── README.md
 ```
 
-## API
+## 用到的框架
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/balance` | 实时余额 |
-| `POST` | `/api/balance/poll` | 手动抓取余额 |
-| `GET` | `/api/usage/daily` | 每日用量统计 |
-| `POST` | `/api/proxy/chat/completions` | 代理转发 |
-| `GET` | `/api/proxy/calls` | 调用记录 |
+- SwiftUI
+- SwiftData（本地存储）
+- Swift Charts（趋势图）
+- Security（Keychain 加密存储）
+- **零第三方依赖**
 
-## 两种数据来源
-
-| 来源 | 方式 | 能看到什么 |
-|------|------|-----------|
-| 🔄 余额差值 | 后端每小时查一次 DeepSeek 余额 | 每天花了多少钱 |
-| 📝 代理记录 | 代码通过后端转发 API 请求 | 每次调用的 Token、模型、费用 |
-
-两种可以同时使用，互相补充。
-
-## License
+## 许可证
 
 MIT

@@ -1,151 +1,145 @@
 import Foundation
+import SwiftData
 import SwiftUI
 
 /// 仪表盘 ViewModel
 ///
-/// 管理仪表盘页面的所有数据状态，包括：
-/// - 实时账户余额
-/// - 今日用量统计
-/// - 最近 30 天消费趋势（用于图表）
+/// 功能：
+/// - 从 Keychain 读取 API Key → 直接调 DeepSeek API
+/// - 余额快照存 SwiftData（本地）
+/// - 通过余额差值推算每日消费
 @MainActor
-class DashboardViewModel: ObservableObject {
+final class DashboardViewModel: ObservableObject {
 
-    // MARK: - 发布的状态
-
-    /// 账户余额
-    @Published var balance: BalanceDetail?
-
-    /// 今日用量
-    @Published var todayUsage: DailyUsageItem?
-
-    /// 最近 30 天用量数据（用于图表）
-    @Published var recentUsage: [DailyUsageItem] = []
-
-    /// 是否正在加载
+    @Published var balance: BalanceInfo?
     @Published var isLoading = false
-
-    /// 错误消息（非 nil 表示有错误）
     @Published var errorMessage: String?
 
-    // MARK: - 计算属性
+    /// 最近 30 天的用量统计（由余额差值计算）
+    @Published var dailyStats: [DailyUsageStat] = []
 
-    /// 本月总消费（根据 recentUsage 计算）
-    var monthlySpending: Double {
-        let now = Date()
-        let calendar = Calendar.current
-        return recentUsage
-            .filter { item in
-                guard let date = item.parsedDate else { return false }
-                return calendar.isDate(date, equalTo: now, toGranularity: .month)
-            }
-            .compactMap { Double($0.estimatedSpending) }
-            .reduce(0, +)
-    }
+    /// 今日消费
+    @Published var todaySpend: Double = 0
 
-    /// 格式化的本月消费
-    var formattedMonthlySpending: String {
-        String(format: "¥%.2f", monthlySpending)
-    }
+    /// 本月消费
+    @Published var monthSpend: Double = 0
 
-    /// 本月总 Token 消耗
-    var monthlyTokens: Int {
-        let now = Date()
-        let calendar = Calendar.current
-        return recentUsage
-            .filter { item in
-                guard let date = item.parsedDate else { return false }
-                return calendar.isDate(date, equalTo: now, toGranularity: .month)
-            }
-            .map(\.proxyTokenCount)
-            .reduce(0, +)
-    }
+    /// 本周消费
+    @Published var weekSpend: Double = 0
 
-    /// 格式化的本月 Token 数
-    var formattedMonthlyTokens: String {
-        if monthlyTokens >= 1_000_000 {
-            return String(format: "%.1fM", Double(monthlyTokens) / 1_000_000)
-        } else if monthlyTokens >= 1_000 {
-            return String(format: "%.0fK", Double(monthlyTokens) / 1_000)
+    // MARK: - 加载数据
+
+    func loadData(modelContext: ModelContext) async {
+        guard KeychainManager.hasKey else {
+            errorMessage = "请先在设置中填入 DeepSeek API Key"
+            return
         }
-        return "\(monthlyTokens)"
-    }
 
-    /// 本月 API 调用次数
-    var monthlyCalls: Int {
-        let now = Date()
-        let calendar = Calendar.current
-        return recentUsage
-            .filter { item in
-                guard let date = item.parsedDate else { return false }
-                return calendar.isDate(date, equalTo: now, toGranularity: .month)
-            }
-            .map(\.proxyCallCount)
-            .reduce(0, +)
-    }
-
-    /// 消费最高的那一天
-    var peakDay: DailyUsageItem? {
-        recentUsage.max { a, b in
-            (Double(a.estimatedSpending) ?? 0) < (Double(b.estimatedSpending) ?? 0)
-        }
-    }
-
-    // MARK: - 数据加载
-
-    /// 加载仪表盘所有数据
-    func loadAllData() async {
         isLoading = true
         errorMessage = nil
 
-        // 并行加载余额、今日用量、30 天趋势
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.fetchBalance() }
-            group.addTask { await self.fetchTodayUsage() }
-            group.addTask { await self.fetchRecentUsage() }
-        }
-        isLoading = false
-    }
-
-    /// 手动刷新（下拉刷新触发）
-    func refresh() async {
-        await loadAllData()
-    }
-
-    /// 手动触发余额抓取
-    func triggerPoll() async {
         do {
-            _ = try await APIClient.shared.triggerBalancePoll()
-            _ = try? await APIClient.shared.fetchBalance()
-            await loadAllData()
+            // 1. 查余额
+            let resp = try await DeepSeekAPI.fetchBalance()
+            balance = resp.balanceInfos.first
+
+            // 2. 保存快照到本地
+            if let info = resp.balanceInfos.first {
+                let snapshot = BalanceSnapshot(
+                    totalBalance: info.totalBalanceValue,
+                    grantedBalance: info.grantedBalanceValue,
+                    toppedUpBalance: info.toppedUpBalanceValue,
+                    currency: info.currency
+                )
+                modelContext.insert(snapshot)
+                try modelContext.save()
+            }
+
+            // 3. 重新计算用量统计
+            calculateStats(modelContext: modelContext)
+
         } catch {
             errorMessage = error.localizedDescription
         }
+
+        isLoading = false
     }
 
-    // MARK: - 私有方法
+    // MARK: - 从本地快照计算消费
 
-    private func fetchBalance() async {
-        do {
-            let info = try await APIClient.shared.fetchBalance()
-            balance = info.balanceInfos.first
-        } catch {
-            errorMessage = "获取余额失败: \(error.localizedDescription)"
+    func calculateStats(modelContext: ModelContext) {
+        let now = Date()
+        let calendar = Calendar.current
+
+        // 取所有快照
+        let descriptor = FetchDescriptor<BalanceSnapshot>(
+            sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+        )
+
+        guard let snapshots = try? modelContext.fetch(descriptor),
+              snapshots.count >= 2 else {
+            dailyStats = []
+            todaySpend = 0
+            monthSpend = 0
+            weekSpend = 0
+            return
         }
+
+        // 按天分组，每天取最早和最后一次快照
+        let grouped = Dictionary(grouping: snapshots) { $0.dateOnly }
+            .sorted { $0.key < $1.key }
+
+        var stats: [DailyUsageStat] = []
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+
+        for (date, daySnapshots) in grouped {
+            guard let first = daySnapshots.first,
+                  let last = daySnapshots.last else { continue }
+
+            let spend = max(0, first.totalBalance - last.totalBalance)
+
+            stats.append(DailyUsageStat(
+                id: df.string(from: date),
+                date: date,
+                spend: spend,
+                snapshot: last
+            ))
+        }
+
+        // 只保留最近 30 天
+        let cutoff = calendar.date(byAdding: .day, value: -30, to: now) ?? now
+        dailyStats = stats.filter { $0.date >= cutoff }
+
+        // 今日
+        let todayStart = calendar.startOfDay(for: now)
+        todaySpend = dailyStats.first(where: { calendar.isDate($0.date, inSameDayAs: todayStart) })?.spend ?? 0
+
+        // 本月
+        monthSpend = dailyStats
+            .filter { calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
+            .map(\.spend)
+            .reduce(0, +)
+
+        // 本周
+        let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
+        weekSpend = dailyStats
+            .filter { $0.date >= weekStart }
+            .map(\.spend)
+            .reduce(0, +)
     }
 
-    private func fetchTodayUsage() async {
-        do {
-            todayUsage = try await APIClient.shared.fetchTodayUsage()
-        } catch {
-            errorMessage = "获取今日用量失败: \(error.localizedDescription)"
-        }
+    // MARK: - 格式化
+
+    var formattedTodaySpend: String {
+        String(format: "¥%.2f", todaySpend)
     }
 
-    private func fetchRecentUsage() async {
-        do {
-            recentUsage = try await APIClient.shared.fetchRecent30DaysUsage()
-        } catch {
-            errorMessage = "获取用量趋势失败: \(error.localizedDescription)"
-        }
+    var formattedMonthSpend: String {
+        String(format: "¥%.2f", monthSpend)
+    }
+
+    var formattedWeekSpend: String {
+        String(format: "¥%.2f", weekSpend)
     }
 }

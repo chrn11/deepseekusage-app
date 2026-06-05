@@ -1,11 +1,10 @@
 import Foundation
 
-/// 账户余额信息
-/// 对应后端 GET /api/balance 的响应
-struct BalanceInfo: Codable, Identifiable {
-    var id: String { balanceInfos.first?.currency ?? "unknown" }
+/// DeepSeek API 返回的余额结构
+/// GET https://api.deepseek.com/user/balance
+struct DeepSeekBalanceResponse: Codable {
     let isAvailable: Bool
-    let balanceInfos: [BalanceDetail]
+    let balanceInfos: [BalanceInfo]
 
     enum CodingKeys: String, CodingKey {
         case isAvailable = "is_available"
@@ -13,8 +12,8 @@ struct BalanceInfo: Codable, Identifiable {
     }
 }
 
-/// 单种货币的余额详情
-struct BalanceDetail: Codable {
+/// 单币种的余额
+struct BalanceInfo: Codable {
     let currency: String
     let totalBalance: String
     let grantedBalance: String
@@ -27,21 +26,26 @@ struct BalanceDetail: Codable {
         case toppedUpBalance = "topped_up_balance"
     }
 
-    /// 格式化的总余额（如 "¥110.00 CNY"）
+    /// 格式化总余额 "¥110.00"
     var formattedTotal: String {
         let symbol = currency == "CNY" ? "¥" : "$"
-        return "\(symbol)\(totalBalance) \(currency)"
+        return "\(symbol)\(totalBalance)"
     }
 
-    /// 格式化的充值余额
+    /// 格式化充值余额
     var formattedToppedUp: String {
         let symbol = currency == "CNY" ? "¥" : "$"
         return "\(symbol)\(toppedUpBalance)"
     }
 
-    /// 格式化的赠送余额
+    /// 格式化赠送余额
     var formattedGranted: String {
         let symbol = currency == "CNY" ? "¥" : "$"
         return "\(symbol)\(grantedBalance)"
     }
+
+    /// 转为 Double
+    var totalBalanceValue: Double { Double(totalBalance) ?? 0 }
+    var grantedBalanceValue: Double { Double(grantedBalance) ?? 0 }
+    var toppedUpBalanceValue: Double { Double(toppedUpBalance) ?? 0 }
 }
