@@ -8,6 +8,7 @@ struct DashboardView: View {
     @State private var pulseScale: CGFloat = 1
     @State private var showRecharge = false
     @State private var showLoginSheet = false
+    @State private var expandedModels: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -229,9 +230,12 @@ struct DashboardView: View {
         ]
         let callPill: (String, String, String, Color)? = vm.isLoggedIn
             ? ("调用", "\(vm.monthCalls)次", "arrow.up.message", Color(hex: "00E6A0")) : nil
+        let tokenPill: (String, String, String, Color)? = vm.isLoggedIn
+            ? ("Token", vm.formattedMonthTokens, "bolt.fill", Color(hex: "FFD93D")) : nil
 
         var items = pills
         if let cp = callPill { items.append(cp) }
+        if let tp = tokenPill { items.append(tp) }
 
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 10) {
             ForEach(0..<items.count, id: \.self) { i in
@@ -418,6 +422,31 @@ struct DashboardView: View {
             }
             .chartPlotStyle { $0.background(Color.clear) }
             .frame(height: 210)
+
+            // 模型费用明细列表
+            if !vm.costModelBreakdown.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("模型费用明细")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color(hex: "A0B0CC"))
+                        .padding(.top, 16)
+
+                    ForEach(Array(vm.costModelBreakdown.prefix(5))) { detail in
+                        ModelCostRow(
+                            detail: detail,
+                            isExpanded: expandedModels.contains(detail.model)
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                if expandedModels.contains(detail.model) {
+                                    expandedModels.remove(detail.model)
+                                } else {
+                                    expandedModels.insert(detail.model)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -534,6 +563,69 @@ struct NeonDonut: View {
                 p.addArc(center: c, radius: r + 3, startAngle: .zero, endAngle: .degrees(360), clockwise: false)
             }
             ctx.stroke(ring, with: .color(.white.opacity(0.12)), lineWidth: 1)
+        }
+    }
+}
+
+struct ModelCostRow: View {
+    let detail: ModelCostDetail
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // 主行
+            Button(action: onToggle) {
+                HStack(spacing: 8) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(Color(hex: "00C6FF"))
+                        .frame(width: 16)
+
+                    Text(detail.model)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Text(String(format: "¥%.2f", detail.totalCost))
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(hex: "00E6A0"))
+                }
+            }
+            .buttonStyle(.plain)
+
+            // 展开的明细
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(detail.details.sorted(by: { $0.amount > $1.amount })) { d in
+                        HStack {
+                            Text(typeDisplayName(d.type))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color(hex: "8C9DB5"))
+                            Spacer()
+                            Text(String(format: "¥%.4f", d.amount))
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(Color(hex: "A0B0CC"))
+                        }
+                        .padding(.leading, 24)
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func typeDisplayName(_ type: String) -> String {
+        switch type {
+        case "PROMPT_TOKEN": return "提示Token"
+        case "PROMPT_CACHE_HIT_TOKEN": return "缓存命中"
+        case "PROMPT_CACHE_MISS_TOKEN": return "缓存未命中"
+        case "RESPONSE_TOKEN": return "输出Token"
+        case "REQUEST": return "请求次数"
+        default: return type
         }
     }
 }

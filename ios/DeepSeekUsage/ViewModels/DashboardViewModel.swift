@@ -157,23 +157,20 @@ final class DashboardViewModel: ObservableObject {
         let todayStr = df.string(from: now)
         let weekStart = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
 
-        // 从费用数据算每日消费（合并所有币种组的 CNY 数据）
+        // 从费用数据算每日消费（优先 CNY 组，其次取第一个组）
         var totalCost: Double = 0; var todayCost: Double = 0; var weekCost: Double = 0
         var totalTokens: Int = 0; var weekT: Int = 0; var totalCalls: Int = 0
+        let costGroup = allCostGroups.first(where: { $0.currency == "CNY" }) ?? allCostGroups.first
 
-        for group in allCostGroups {
-            // 优先使用 CNY，如果用户主币种是 USD 则后述兜底时切换
-            let isCNY = group.currency == "CNY"
-            for day in (group.days ?? []) {
+        if let days = costGroup?.days {
+            for day in days {
                 guard let dayModels = day.data else { continue }
                 for m in dayModels {
                     for u in (m.usage ?? []) {
                         let amt = Double(u.amount ?? "0") ?? 0
-                        if isCNY {
-                            totalCost += amt
-                            if day.date == todayStr { todayCost += amt }
-                            if let d = df.date(from: day.date ?? ""), d >= weekStart { weekCost += amt }
-                        }
+                        totalCost += amt
+                        if day.date == todayStr { todayCost += amt }
+                        if let d = df.date(from: day.date ?? ""), d >= weekStart { weekCost += amt }
                     }
                 }
             }
@@ -266,6 +263,26 @@ final class DashboardViewModel: ObservableObject {
         }.sorted { $0.date < $1.date }
     }
 
+    /// 模型费用明细（按模型分组，使用 CNY 组的总数据）
+    var costModelBreakdown: [ModelCostDetail] {
+        let cnyGroup = allCostGroups.first(where: { $0.currency == "CNY" }) ?? allCostGroups.first
+        guard let models = cnyGroup?.total else { return [] }
+        
+        return models.compactMap { m -> ModelCostDetail? in
+            guard let name = m.model else { return nil }
+            var total: Double = 0
+            var details: [CostDetail] = []
+            
+            for u in (m.usage ?? []) {
+                let amt = Double(u.amount ?? "0") ?? 0
+                total += amt
+                details.append(CostDetail(type: u.type ?? "未知", amount: amt))
+            }
+            
+            return ModelCostDetail(model: name, totalCost: total, details: details)
+        }.sorted { $0.totalCost > $1.totalCost }
+    }
+
     // MARK: - fmt
 
     var formattedTodaySpend: String  { String(format: "¥%.2f", todaySpend) }
@@ -291,6 +308,21 @@ struct ModelShare: Identifiable {
         : tokens >= 1_000   ? String(format: "%.0fK", Double(tokens)/1_000) : "\(tokens)"
     }
     var formattedCost: String { String(format: "¥%.2f", cost) }
+}
+
+/// 模型费用明细（按类型分组）
+struct ModelCostDetail: Identifiable {
+    let id = UUID()
+    let model: String
+    let totalCost: Double
+    let details: [CostDetail]
+}
+
+/// 单项费用明细（PROMPT_TOKEN / CACHE_HIT / CACHE_MISS / RESPONSE_TOKEN / REQUEST）
+struct CostDetail: Identifiable {
+    let id = UUID()
+    let type: String
+    let amount: Double
 }
 
 struct DailyCost: Identifiable {
