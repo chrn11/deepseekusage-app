@@ -38,6 +38,10 @@ struct DashboardView: View {
                 if vm.balance == nil { await vm.loadAll() }
                 vm.computeStats()
             }
+            .onReceive(NotificationCenter.default.publisher(for: KeychainManager.loginStatusChanged)) { _ in
+                vm.isLoggedIn = KeychainManager.hasToken
+                Task { await vm.loadAll(); vm.computeStats() }
+            }
             .sheet(isPresented: $showLoginSheet) {
                 LoginView(onLoginSuccess: {
                     showLoginSheet = false

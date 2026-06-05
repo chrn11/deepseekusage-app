@@ -4,6 +4,8 @@ import Security
 /// 钥匙串管理器 — 安全存储 API Key 和平台 Cookie
 enum KeychainManager {
 
+    static let loginStatusChanged = Notification.Name("com.deepseekusage.loginStatusChanged")
+
     private static let service = "com.deepseekusage.app"
 
     // MARK: - 通用存储
@@ -114,6 +116,7 @@ enum KeychainManager {
     static func logoutPlatform() {
         try? deleteCookie()
         try? deleteToken()
+        NotificationCenter.default.post(name: loginStatusChanged, object: nil)
     }
 
     // 兼容旧方法名

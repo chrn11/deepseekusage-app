@@ -129,6 +129,7 @@ struct SettingsView: View {
         .sheet(isPresented: $showLoginSheet) {
             LoginView(onLoginSuccess: {
                 showLoginSheet = false
+                NotificationCenter.default.post(name: KeychainManager.loginStatusChanged, object: nil)
             })
         }
     }
