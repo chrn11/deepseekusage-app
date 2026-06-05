@@ -9,7 +9,7 @@ options:
   minimumXcodeGenVersion: "2.40"
   deploymentTarget:
     iOS: "16.0"
-  xcodeVersion: "15.0"
+  xcodeVersion: "16.0"
   generateEmptyDirectories: true
 
 settings:

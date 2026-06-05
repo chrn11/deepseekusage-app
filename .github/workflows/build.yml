@@ -26,19 +26,22 @@ on:
 jobs:
   build:
     name: Build Unsigned IPA
-    runs-on: macos-14       # macOS 14 带 Xcode 15.x，支持 iOS 17 SDK
+    runs-on: macos-15       # macOS 15 带 Xcode 16.x，支持 XcodeGen 2.45+ 生成的格式
 
     steps:
       # ---- 步骤 1: 检出代码 ----
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          show-progress: false
 
       # ---- 步骤 2: 设置 Xcode ----
       - name: Select Xcode
         run: |
           echo "Available Xcodes:"
           ls /Applications/ | grep Xcode || true
-          sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode_16.app || true
+          # macos-15 自带 Xcode 16.x，默认即可
+          sudo xcode-select -s /Applications/Xcode_16.app || true
           xcodebuild -version
           xcodebuild -showsdks
 
