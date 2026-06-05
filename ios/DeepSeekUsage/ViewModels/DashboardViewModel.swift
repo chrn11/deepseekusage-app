@@ -277,6 +277,30 @@ final class DashboardViewModel: ObservableObject {
     }
 }
 
+// MARK: - 共享模型
+
+struct ModelShare: Identifiable {
+    let id = UUID()
+    let model: String; let tokens: Int; let cost: Double; let fraction: Double
+    var pct: String { String(format: "%.0f%%", fraction * 100) }
+    var formattedTokens: String {
+        tokens >= 1_000_000 ? String(format: "%.1fM", Double(tokens)/1_000_000)
+        : tokens >= 1_000   ? String(format: "%.0fK", Double(tokens)/1_000) : "\(tokens)"
+    }
+    var formattedCost: String { String(format: "¥%.2f", cost) }
+}
+
+struct DailyCost: Identifiable {
+    let id = UUID(); let date: String; let cost: Double
+    var formattedDate: String { date.count >= 10 ? String(date.suffix(5)) : date }
+    var formattedCost: String { String(format: "¥%.2f", cost) }
+}
+
+struct IOPair: Identifiable {
+    let id = UUID(); let date: String; let input: Int; let output: Int
+    var shortDate: String { date.count >= 10 ? String(date.suffix(5)) : date }
+}
+
 // MARK: - YearMonth
 
 struct YearMonth: Equatable, Hashable, Comparable {
