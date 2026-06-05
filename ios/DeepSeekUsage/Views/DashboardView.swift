@@ -126,7 +126,7 @@ struct DashboardView: View {
             Label("消费趋势（DeepSeek 平台数据）", systemImage: "chart.line.uptrend.xyaxis")
                 .font(.headline)
 
-            Chart(dailyCosts) { item in
+            Chart(vm.dailyCosts) { item in
                 BarMark(
                     x: .value("日期", item.formattedDate),
                     y: .value("消费", item.cost)
