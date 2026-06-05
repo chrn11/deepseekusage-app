@@ -1,22 +1,24 @@
 import SwiftUI
 import Charts
 
-/// 仪表盘 — 深海仪表盘
+// MARK: - 仪表盘主视图
+
 struct DashboardView: View {
     @StateObject private var vm = DashboardViewModel()
     @State private var pulseScale: CGFloat = 1
+    @State private var appeared = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: 20) {
                     headerSection
                     balanceHero
-                    statGrid
-                    if vm.isLoggedIn { monthPicker }
-                    if !vm.modelBreakdown.isEmpty { modelPie }
-                    if !vm.ioByDay.isEmpty      { ioChart }
-                    if !vm.filteredCosts.isEmpty { costChart }
+                    statRow
+                    if vm.isLoggedIn { monthPicker.transition(.move(edge: .top).combined(with: .opacity)) }
+                    if !vm.modelBreakdown.isEmpty { modelSection }
+                    if !vm.ioByDay.isEmpty      { ioSection }
+                    if !vm.filteredCosts.isEmpty { costSection }
                     if !vm.isLoggedIn { loginPrompt }
                 }
                 .padding(.horizontal, 16)
@@ -33,11 +35,12 @@ struct DashboardView: View {
             .task {
                 if vm.balance == nil { await vm.loadAll() }
                 vm.calculateStats()
+                withAnimation(.easeOut(duration: 0.6).delay(0.2)) { appeared = true }
             }
         }
     }
 
-    // MARK: - 顶栏
+    // MARK: 顶栏 ============================
 
     private var headerSection: some View {
         HStack {
@@ -57,8 +60,7 @@ struct DashboardView: View {
             } label: {
                 ZStack {
                     if vm.isLoading { ProgressView().tint(Color(hex: "00C6FF")) }
-                    else { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 18, weight: .medium))
-                        .foregroundColor(Color(hex: "00C6FF")) }
+                    else { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 18, weight: .medium)).foregroundColor(Color(hex: "00C6FF")) }
                 }
                 .frame(width: 40, height: 40).scaleEffect(pulseScale)
                 .background(Circle().fill(Color(hex: "00C6FF").opacity(0.08)))
@@ -69,59 +71,66 @@ struct DashboardView: View {
         .padding(.top, 8)
     }
 
-    // MARK: - 余额卡片
+    // MARK: 余额卡片 ============================
 
     private var balanceHero: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 24)
-                .fill(LinearGradient(colors: [Color(hex: "0A1C3A"), Color(hex: "0D2247"), Color(hex: "091428")],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .fill(LinearGradient(colors: [Color(hex: "0A1C3A"), Color(hex: "0D2247"), Color(hex: "091428")], startPoint: .topLeading, endPoint: .bottomTrailing))
                 .overlay(Circle().fill(Color(hex: "00C6FF").opacity(0.18)).frame(width: 160, height: 160).blur(radius: 50).offset(x: 60, y: 40))
                 .overlay(Circle().fill(Color(hex: "7C5CFC").opacity(0.12)).frame(width: 100, height: 100).blur(radius: 40).offset(x: -80, y: -20))
+                .overlay(
+                    // 底部流光线条
+                    LinearGradient(colors: [.clear, Color(hex: "00C6FF").opacity(0.3), Color(hex: "7C5CFC").opacity(0.2), .clear], startPoint: .leading, endPoint: .trailing)
+                        .frame(height: 1.5)
+                        .offset(y: -1)
+                        .mask(RoundedRectangle(cornerRadius: 24))
+                    , alignment: .bottom)
             RoundedRectangle(cornerRadius: 24)
-                .stroke(LinearGradient(colors: [.white.opacity(0.08), Color(hex: "00C6FF").opacity(0.15)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+                .stroke(LinearGradient(colors: [.white.opacity(0.08), Color(hex: "00C6FF").opacity(0.15)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
 
             VStack(spacing: 14) {
                 HStack {
                     HStack(spacing: 6) {
                         Image(systemName: "diamond.fill").font(.system(size: 12)).foregroundColor(Color(hex: "00C6FF"))
-                        Text("账户余额").font(.system(size: 13, weight: .medium)).foregroundColor(Color(hex: "7B89A0"))
+                        Text("余额").font(.system(size: 13, weight: .medium)).foregroundColor(Color(hex: "7B89A0"))
                     }
                     Spacer()
                     if vm.alertEnabled, let b = vm.balance, b.totalBalanceValue <= vm.alertThreshold {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10))
-                            Text("余额不足").font(.system(size: 10, weight: .bold))
+                            Text("不足").font(.system(size: 10, weight: .bold))
                         }
                         .foregroundColor(Color(hex: "FF6B6B"))
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color(hex: "FF6B6B").opacity(0.15))
-                        .clipShape(Capsule())
+                        .background(Color(hex: "FF6B6B").opacity(0.15)).clipShape(Capsule())
                     }
                     if let c = vm.balance?.currency {
-                        Text(c).font(.system(size: 11, weight: .bold).monospacedDigit())
-                            .foregroundColor(Color(hex: "00C6FF"))
+                        Text(c).font(.system(size: 11, weight: .bold).monospacedDigit()).foregroundColor(Color(hex: "00C6FF"))
                             .padding(.horizontal, 10).padding(.vertical, 4)
                             .background(Color(hex: "00C6FF").opacity(0.1)).clipShape(Capsule())
                     }
                 }
+
                 if let b = vm.balance {
                     Text(b.formattedTotal)
                         .font(.system(size: 42, weight: .bold, design: .monospaced))
                         .foregroundColor(Color(hex: "E8EDF5"))
-                } else if KeychainManager.hasAPIKey {
-                    Text("¥ --.--").font(.system(size: 42, weight: .bold, design: .monospaced)).foregroundColor(Color(hex: "E8EDF5").opacity(0.5))
-                } else {
-                    Text("填入 Key 开始").font(.system(size: 26, weight: .bold)).foregroundColor(Color(hex: "7B89A0"))
-                }
-                if let b = vm.balance {
-                    HStack(spacing: 0) {
-                        subItem("充值", b.formattedToppedUp, Color(hex: "00E6A0"))
-                        Divider().frame(height: 24).background(Color.white.opacity(0.06)).padding(.horizontal, 20)
-                        subItem("赠送", b.formattedGranted, Color(hex: "00C6FF"))
+                    HStack(spacing: 24) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("充值").font(.system(size: 10)).foregroundColor(Color(hex: "5A6A82"))
+                            Text(b.formattedToppedUp).font(.system(size: 16, weight: .semibold, design: .monospaced)).foregroundColor(Color(hex: "00E6A0"))
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("赠送").font(.system(size: 10)).foregroundColor(Color(hex: "5A6A82"))
+                            Text(b.formattedGranted).font(.system(size: 16, weight: .semibold, design: .monospaced)).foregroundColor(Color(hex: "00C6FF"))
+                        }
                         Spacer()
                     }
+                } else if KeychainManager.hasAPIKey {
+                    Text("¥ --.--").font(.system(size: 42, weight: .bold, design: .monospaced)).foregroundColor(Color(hex: "E8EDF5").opacity(0.4))
+                } else {
+                    Text("填入 Key 开始").font(.system(size: 26, weight: .bold)).foregroundColor(Color(hex: "7B89A0"))
                 }
             }
             .padding(22)
@@ -129,82 +138,92 @@ struct DashboardView: View {
         .padding(.top, 2)
     }
 
-    private func subItem(_ l: String, _ v: String, _ c: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(l).font(.system(size: 11)).foregroundColor(Color(hex: "5A6A82"))
-            Text(v).font(.system(size: 15, weight: .semibold, design: .monospaced)).foregroundColor(c)
-        }
-    }
+    // MARK: 统计条 ============================
 
-    // MARK: - 统计
-
-    private var statGrid: some View {
-        LazyVGrid(columns: [.init(.flexible()), .init(.flexible()), .init(.flexible())], spacing: 10) {
-            GlassStatCard(title: "今日",   value: vm.formattedTodaySpend, icon: "clock",                color: Color(hex: "FF6B6B"))
-            GlassStatCard(title: "本周",   value: vm.formattedWeekSpend,  icon: "calendar.badge.clock", color: Color(hex: "00C6FF"))
-            GlassStatCard(title: mcLabel,  value: vm.formattedMonthSpend, icon: "calendar", color: Color(hex: "7C5CFC"))
+    private var statRow: some View {
+        HStack(spacing: 10) {
+            MiniStat(icon: "clock", title: "今日", value: vm.formattedTodaySpend, glow: Color(hex: "FF6B6B"))
+            MiniStat(icon: "calendar.badge.clock", title: "本周", value: vm.formattedWeekSpend, glow: Color(hex: "00C6FF"))
+            MiniStat(icon: "calendar", title: mcLabel, value: vm.formattedMonthSpend, glow: Color(hex: "7C5CFC"))
             if vm.isLoggedIn {
-                GlassStatCard(title: "周Token", value: vm.formattedWeekTokens,  icon: "text.word.spacing", color: Color(hex: "00E6A0"))
-                GlassStatCard(title: "月Token", value: vm.formattedMonthTokens, icon: "text.alignleft",   color: Color(hex: "00C6FF"))
-                GlassStatCard(title: "调用",     value: "\(vm.monthCalls)次",   icon: "arrow.up.message", color: Color(hex: "7C5CFC"))
+                MiniStat(icon: "arrow.up.message", title: "调用", value: "\(vm.monthCalls)次", glow: Color(hex: "00E6A0"))
             }
         }
     }
 
     private var mcLabel: String { vm.selectedMonth == YearMonth.current ? "本月" : "\(vm.selectedMonth.month)月" }
 
-    // MARK: - 月份
+    // MARK: 月份 ============================
 
     private var monthPicker: some View {
         HStack(spacing: 0) {
-            Btn(nav: -1)
-            Text(vm.selectedMonthLabel)
-                .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                .foregroundColor(Color(hex: "E8EDF5")).frame(maxWidth: .infinity)
-            Btn(nav: 1)
+            navBtn(-1)
+            Text(vm.selectedMonthLabel).font(.system(size: 15, weight: .semibold, design: .monospaced)).foregroundColor(Color(hex: "E8EDF5")).frame(maxWidth: .infinity)
+            navBtn(1)
         }
-        .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 12)
-            .fill(Color(hex: "0A1228").opacity(0.6))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: "00C6FF").opacity(0.12), lineWidth: 1)))
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: "0A1228").opacity(0.6)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: "00C6FF").opacity(0.12), lineWidth: 1)))
     }
 
-    private func Btn(nav: Int) -> some View {
-        let isPrev = nav == -1
+    private func navBtn(_ dir: Int) -> some View {
+        let isPrev = dir == -1
         let ok = isPrev
             ? (vm.availableMonths.firstIndex(of: vm.selectedMonth) ?? 0) + 1 < vm.availableMonths.count
             : (vm.availableMonths.firstIndex(of: vm.selectedMonth) ?? 0) > 0
-        return Button {
-            withAnimation { isPrev ? vm.previousMonth() : vm.nextMonth() }
-        } label: {
+        return Button { withAnimation { isPrev ? vm.previousMonth() : vm.nextMonth() } } label: {
             Image(systemName: isPrev ? "chevron.left" : "chevron.right")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(ok ? Color(hex: "00C6FF") : Color(hex: "5A6A82").opacity(0.3))
                 .frame(width: 36, height: 36)
-        }
-        .disabled(!ok)
+        }.disabled(!ok)
     }
 
-    // MARK: - 模型饼图
+    // MARK: 模型饼图 ============================
 
-    private var modelPie: some View {
-        chartBox(title: "模型用量占比", subtitle: "\(vm.modelBreakdown.count) 个模型") {
-            VStack(spacing: 12) {
-                DonutChart(data: vm.modelBreakdown).frame(height: 160)
-                LazyVGrid(columns: [.init(.flexible()), .init(.flexible())], spacing: 6) {
-                    ForEach(vm.modelBreakdown) { m in
-                        HStack(spacing: 4) {
-                            Circle().fill(modelColor(m.model)).frame(width: 8, height: 8)
-                            Text(m.model).font(.system(size: 11)).foregroundColor(Color(hex: "7B89A0")).lineLimit(1)
-                            Text(m.pct).font(.system(size: 10, weight: .bold)).foregroundColor(Color(hex: "5A6A82"))
-                            Spacer()
+    private var modelSection: some View {
+        let top = vm.modelBreakdown.prefix(5)
+        let topTokens = top.map(\.tokens).reduce(0, +)
+        let midToken = topTokens / max(top.count, 1)
+
+        return VStack(spacing: 0) {
+            sectionHead("cpu.fill", "模型用量", "Token 占比")
+            VStack(spacing: 0) {
+                // 环形图 + 中心数据
+                ZStack {
+                    NeonDonut(data: Array(top)).frame(height: 180)
+                    VStack(spacing: 2) {
+                        Text("\(vm.modelBreakdown.count)")
+                            .font(.system(size: 32, weight: .bold, design: .monospaced)).foregroundColor(Color(hex: "E8EDF5"))
+                        Text("模型").font(.system(size: 11)).foregroundColor(Color(hex: "5A6A82"))
+                    }
+                }
+
+                // 横向进度条图例
+                VStack(spacing: 8) {
+                    ForEach(Array(top.enumerated()), id: \.element.model) { i, m in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Circle().fill(modelColor(m.model)).frame(width: 8, height: 8)
+                                Text(m.model).font(.system(size: 12, weight: .medium)).foregroundColor(Color(hex: "C8D2E0"))
+                                Spacer()
+                                Text(m.pct).font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundColor(Color(hex: "E8EDF5"))
+                                Text("· \(m.formattedTokens)").font(.system(size: 10, design: .monospaced)).foregroundColor(Color(hex: "5A6A82"))
+                                Text("· \(m.formattedCost)").font(.system(size: 10, design: .monospaced)).foregroundColor(Color(hex: "00E6A0"))
+                            }
+                            GeometryReader { geo in
+                                RoundedRectangle(cornerRadius: 2).fill(Color.white.opacity(0.04))
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(modelColor(m.model))
+                                    .frame(width: geo.size.width * CGFloat(m.fraction))
+                            }
+                            .frame(height: 3)
                         }
                     }
                 }
-                .padding(.horizontal, 8)
+                .padding(16)
             }
-            .padding(.bottom, 12)
         }
+        .background(panelBg)
     }
 
     private let modelColors: [Color] = [
@@ -218,57 +237,113 @@ struct DashboardView: View {
         return modelColors[i % modelColors.count]
     }
 
-    // MARK: - I/O 堆叠柱状图
+    // MARK: I/O 图表 ============================
 
-    private var ioChart: some View {
-        chartBox(title: "Token 输入 / 输出", subtitle: "蓝色=输入 紫色=输出") {
+    private var ioSection: some View {
+        let totalIn  = vm.filteredAmounts.map(\.inputTokens).reduce(0, +)
+        let totalOut = vm.filteredAmounts.map(\.outputTokens).reduce(0, +)
+        let totalAll = totalIn + totalOut
+        let inPct  = totalAll > 0 ? Double(totalIn)  / Double(totalAll) : 0
+        let outPct = totalAll > 0 ? Double(totalOut) / Double(totalAll) : 0
+
+        return VStack(spacing: 0) {
+            sectionHead("arrow.left.arrow.right", "Token 流量", "输入 vs 输出")
+
+            // 摘要行
+            HStack(spacing: 16) {
+                flowBlock(label: "输入", value: fmtTok(totalIn),  pct: inPct,  color: Color(hex: "00C6FF"))
+                flowBlock(label: "输出", value: fmtTok(totalOut), pct: outPct, color: Color(hex: "7C5CFC"))
+                flowBlock(label: "合计", value: fmtTok(totalAll), pct: 1,     color: Color(hex: "E8EDF5"))
+            }
+            .padding(.horizontal, 16).padding(.top, 10)
+
+            // 堆叠面积图
             Chart(vm.ioByDay) { pair in
-                BarMark(x: .value("日期", pair.shortDate), y: .value("输入", pair.input))
-                    .foregroundStyle(Color(hex: "00C6FF").opacity(0.8))
-                BarMark(x: .value("日期", pair.shortDate), y: .value("输出", pair.output))
-                    .foregroundStyle(Color(hex: "7C5CFC").opacity(0.8))
+                AreaMark(x: .value("", pair.shortDate), y: .value("输出", pair.output))
+                    .foregroundStyle(LinearGradient(colors: [Color(hex: "7C5CFC").opacity(0.5), Color(hex: "7C5CFC").opacity(0.05)], startPoint: .top, endPoint: .bottom))
+                LineMark(x: .value("", pair.shortDate), y: .value("输出", pair.output))
+                    .foregroundStyle(Color(hex: "7C5CFC")).lineStyle(StrokeStyle(lineWidth: 1.5))
+                AreaMark(x: .value("", pair.shortDate), y: .value("输入", pair.input))
+                    .foregroundStyle(LinearGradient(colors: [Color(hex: "00C6FF").opacity(0.6), Color(hex: "00C6FF").opacity(0.05)], startPoint: .top, endPoint: .bottom))
+                LineMark(x: .value("", pair.shortDate), y: .value("输入", pair.input))
+                    .foregroundStyle(Color(hex: "00C6FF")).lineStyle(StrokeStyle(lineWidth: 1.5))
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .day, count: 5)) {
-                    AxisValueLabel().foregroundStyle(Color(hex: "5A6A82"))
-                }
+                AxisMarks(values: .stride(by: .day, count: 5)) { AxisValueLabel().foregroundStyle(Color(hex: "5A6A82")) }
             }
             .chartYAxis {
-                AxisMarks { AxisGridLine().foregroundStyle(Color.white.opacity(0.04)) }
+                AxisMarks { AxisGridLine().foregroundStyle(Color.white.opacity(0.03)) }
             }
             .chartPlotStyle { $0.background(Color.clear) }
             .frame(height: 180)
+            .padding(.horizontal, 8).padding(.bottom, 8)
         }
+        .background(panelBg)
     }
 
-    // MARK: - 费用柱状图
+    private func fmtTok(_ n: Int) -> String {
+        n >= 1_000_000 ? String(format: "%.1fM", Double(n)/1_000_000) :
+        n >= 1_000     ? String(format: "%.0fK", Double(n)/1_000) : "\(n)"
+    }
 
-    private var costChart: some View {
-        chartBox(title: "消费趋势", subtitle: "日粒度 · ¥") {
-            Chart(vm.filteredCosts) { item in
-                BarMark(x: .value("日期", item.formattedDate), y: .value("消费", item.cost))
+    // MARK: 费用图表 ============================
+
+    private var costSection: some View {
+        let costs = vm.filteredCosts
+        let total = costs.map(\.cost).reduce(0, +)
+        let avg = costs.isEmpty ? 0 : total / Double(costs.count)
+        let peak = costs.map(\.cost).max() ?? 0
+
+        return VStack(spacing: 0) {
+            sectionHead("yensign.circle.fill", "消费曲线", "日均 ¥\(String(format: "%.2f", avg))")
+
+            // KPI 行
+            HStack(spacing: 16) {
+                kpiChip("总计", String(format: "¥%.2f", total), Color(hex: "00E6A0"))
+                kpiChip("峰值", String(format: "¥%.2f", peak), Color(hex: "FFD93D"))
+                kpiChip("日均", String(format: "¥%.2f", avg), Color(hex: "00C6FF"))
+            }
+            .padding(.horizontal, 16).padding(.top, 10)
+
+            // 渐变面积图 + 圆点线
+            Chart(costs) { item in
+                AreaMark(x: .value("", item.formattedDate), y: .value("", item.cost))
                     .foregroundStyle(LinearGradient(
-                        colors: [Color(hex: "00E6A0").opacity(0.9), Color(hex: "00E6A0").opacity(0.2)],
+                        colors: [Color(hex: "00E6A0").opacity(0.4), Color(hex: "00E6A0").opacity(0.02)],
                         startPoint: .top, endPoint: .bottom))
-                    .cornerRadius(3)
+
+                LineMark(x: .value("", item.formattedDate), y: .value("", item.cost))
+                    .foregroundStyle(LinearGradient(
+                        colors: [Color(hex: "00E6A0"), Color(hex: "00C6FF")],
+                        startPoint: .leading, endPoint: .trailing))
+                    .lineStyle(StrokeStyle(lineWidth: 2))
+
+                PointMark(x: .value("", item.formattedDate), y: .value("", item.cost))
+                    .foregroundStyle(Color(hex: "00E6A0")).symbolSize(20)
+
+                // 平均值参考线
+                RuleMark(y: .value("均值", avg))
+                    .foregroundStyle(Color(hex: "FFD93D").opacity(0.4))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .annotation(position: .top, alignment: .trailing) {
+                        Text("均值 ¥\(String(format: "%.2f", avg))").font(.system(size: 9))
+                            .foregroundColor(Color(hex: "FFD93D").opacity(0.7))
+                    }
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .day, count: 5)) {
-                    AxisValueLabel().foregroundStyle(Color(hex: "5A6A82"))
-                }
+                AxisMarks(values: .stride(by: .day, count: 5)) { AxisValueLabel().foregroundStyle(Color(hex: "5A6A82")) }
             }
             .chartYAxis {
-                AxisMarks {
-                    AxisValueLabel().foregroundStyle(Color(hex: "5A6A82"))
-                    AxisGridLine().foregroundStyle(Color.white.opacity(0.04))
-                }
+                AxisMarks { AxisGridLine().foregroundStyle(Color.white.opacity(0.03)) }
             }
             .chartPlotStyle { $0.background(Color.clear) }
-            .frame(height: 180)
+            .frame(height: 200)
+            .padding(.horizontal, 8).padding(.bottom, 8)
         }
+        .background(panelBg)
     }
 
-    // MARK: - 登录
+    // MARK: 登录 ============================
 
     private var loginPrompt: some View {
         NavigationLink { LoginView() } label: {
@@ -276,89 +351,130 @@ struct DashboardView: View {
                 Image(systemName: "sparkles").foregroundColor(Color(hex: "7C5CFC"))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("登录查看详细用量").font(.system(size: 14, weight: .semibold)).foregroundColor(Color(hex: "E8EDF5"))
-                    Text("Token 明细 · 费用曲线 · 模型分布").font(.system(size: 12)).foregroundColor(Color(hex: "5A6A82"))
+                    Text("Token 明细 · 消费曲线 · 模型分布").font(.system(size: 12)).foregroundColor(Color(hex: "5A6A82"))
                 }
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption).foregroundColor(Color(hex: "00C6FF"))
             }
             .padding(14)
-            .background(RoundedRectangle(cornerRadius: 14)
-                .fill(Color(hex: "0A1228").opacity(0.7))
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color(hex: "0A1228").opacity(0.7))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: "7C5CFC").opacity(0.15), lineWidth: 1)))
         }
     }
 
-    // MARK: - 图表容器
+    // MARK: 共享组件 ============================
 
-    private func chartBox(title: String, subtitle: String,
-                          @ViewBuilder content: () -> some View) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Label(title, systemImage: "chart.line.uptrend.xyaxis")
-                    .font(.system(size: 14, weight: .semibold)).foregroundColor(Color(hex: "7B89A0"))
-                Spacer()
-                Text(subtitle).font(.system(size: 11)).foregroundColor(Color(hex: "5A6A82"))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Color.white.opacity(0.04)).clipShape(Capsule())
-            }
-            .padding(.horizontal, 16).padding(.top, 16)
-            content()
-                .padding(.horizontal, 8).padding(.bottom, 8)
+    private func sectionHead(_ icon: String, _ title: String, _ sub: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 13)).foregroundColor(Color(hex: "00C6FF"))
+            Text(title).font(.system(size: 15, weight: .semibold)).foregroundColor(Color(hex: "E8EDF5"))
+            Spacer()
+            Text(sub).font(.system(size: 10, weight: .medium)).foregroundColor(Color(hex: "5A6A82"))
+                .padding(.horizontal, 8).padding(.vertical, 2)
+                .background(Color.white.opacity(0.04)).clipShape(Capsule())
         }
-        .background(RoundedRectangle(cornerRadius: 18)
-            .fill(Color(hex: "0A1228").opacity(0.7))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.06), lineWidth: 1)))
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
+    }
+
+    private var panelBg: some View {
+        RoundedRectangle(cornerRadius: 18)
+            .fill(Color(hex: "0A1228").opacity(0.5))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.05), lineWidth: 1))
+            .padding(.bottom, 6)
     }
 }
 
-// MARK: - Canvas 饼图（iOS 16 兼容，SectorMark 仅 iOS 17+）
+// MARK: - MiniStat 横向统计条
 
-struct DonutChart: View {
+struct MiniStat: View {
+    let icon: String; let title: String; let value: String; let glow: Color
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 13)).foregroundColor(glow).frame(width: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value).font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundColor(Color(hex: "E8EDF5")).lineLimit(1)
+                Text(title).font(.system(size: 10)).foregroundColor(Color(hex: "5A6A82"))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8).padding(.horizontal, 10)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: "0A1228").opacity(0.6))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(glow.opacity(0.1), lineWidth: 1)))
+    }
+}
+
+// MARK: - FlowBlock（I/O 摘要块）
+
+struct flowBlock: View {
+    let label: String; let value: String; let pct: Double; let color: Color
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(label).font(.system(size: 10)).foregroundColor(Color(hex: "5A6A82"))
+            }
+            Text(value).font(.system(size: 18, weight: .bold, design: .monospaced)).foregroundColor(color)
+            Text(String(format: "%.0f%%", pct * 100)).font(.system(size: 9, weight: .bold)).foregroundColor(color.opacity(0.5))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(color.opacity(0.06)).overlay(RoundedRectangle(cornerRadius: 10).stroke(color.opacity(0.1), lineWidth: 1)))
+    }
+}
+
+// MARK: - KPI Chip 费用摘要
+
+struct kpiChip: View {
+    let label: String; let value: String; let color: Color
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value).font(.system(size: 17, weight: .bold, design: .monospaced)).foregroundColor(color)
+            Text(label).font(.system(size: 9)).foregroundColor(Color(hex: "5A6A82"))
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(color.opacity(0.06)).overlay(RoundedRectangle(cornerRadius: 10).stroke(color.opacity(0.1), lineWidth: 1)))
+    }
+}
+
+// MARK: - NeonDonut 发光环形图
+
+struct NeonDonut: View {
     let data: [ModelShare]
-    private let colors: [Color] = [Color(hex: "00C6FF"), Color(hex: "7C5CFC"), Color(hex: "00E6A0"),
-                                    Color(hex: "FF6B6B"), Color(hex: "FFD93D"), Color(hex: "FF8C42"),
-                                    Color(hex: "C0A8FF"), Color(hex: "5CE1E6")]
+    private let colors: [Color] = [Color(hex: "00C6FF"), Color(hex: "7C5CFC"), Color(hex: "00E6A0"), Color(hex: "FF6B6B"), Color(hex: "FFD93D")]
 
     var body: some View {
         Canvas { ctx, size in
             let total = data.map(\.tokens).reduce(0, +)
             guard total > 0 else { return }
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            let radius = min(size.width, size.height) / 2 * 0.75
-            let inner = radius * 0.55
-            var startAngle = -Double.pi / 2
+            let radius = min(size.width, size.height) / 2 * 0.7
+            let inner = radius * 0.58
+            var angle = -Double.pi / 2
+            let totalFracs = data.map { Double($0.tokens) / Double(total) }
 
-            for (i, m) in data.enumerated() {
-                let frac = Double(m.tokens) / Double(total)
-                let endAngle = startAngle + frac * 2 * .pi
+            // 分段
+            for (i, frac) in totalFracs.enumerated() {
+                let end = angle + frac * 2 * .pi
                 let path = Path { p in
-                    p.addArc(center: center, radius: radius, startAngle: Angle(radians: startAngle),
-                             endAngle: Angle(radians: endAngle), clockwise: false)
-                    p.addArc(center: center, radius: inner, startAngle: Angle(radians: endAngle),
-                             endAngle: Angle(radians: startAngle), clockwise: true)
+                    p.addArc(center: center, radius: radius, startAngle: Angle(radians: angle), endAngle: .radians(end), clockwise: false)
+                    p.addArc(center: center, radius: inner, startAngle: .radians(end), endAngle: Angle(radians: angle), clockwise: true)
                     p.closeSubpath()
                 }
+                // 发光阴影层
+                ctx.addFilter(.blur(radius: 3))
+                ctx.fill(path, with: .color(colors[i % colors.count].opacity(0.3)))
+                ctx.addFilter(.blur(radius: 0))
+                // 实心层
                 ctx.fill(path, with: .color(colors[i % colors.count]))
-                startAngle = endAngle
+                angle = end
             }
-        }
-    }
-}
 
-// MARK: - 统计卡片
-
-struct GlassStatCard: View {
-    let title: String; let value: String; let icon: String; let color: Color
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 13)).foregroundColor(color).frame(height: 20)
-            Text(value).font(.system(size: 15, weight: .bold, design: .monospaced))
-                .foregroundColor(Color(hex: "E8EDF5")).lineLimit(1).minimumScaleFactor(0.7)
-            Text(title).font(.system(size: 10)).foregroundColor(Color(hex: "5A6A82"))
+            // 外圈发光环
+            let ring = Path { p in
+                p.addArc(center: center, radius: radius + 2, startAngle: .zero, endAngle: .degrees(360), clockwise: false)
+            }
+            ctx.stroke(ring, with: .color(.white.opacity(0.08)), lineWidth: 1)
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 14)
-        .background(RoundedRectangle(cornerRadius: 14)
-            .fill(Color(hex: "0A1228").opacity(0.6))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(color.opacity(0.12), lineWidth: 1)))
     }
 }
