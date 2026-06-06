@@ -315,7 +315,8 @@ final class DashboardViewModel: ObservableObject {
                     if u.type == "REQUEST" {
                         let count = Int(u.amount ?? "0") ?? 0
                         if modelData[modelName] == nil { modelData[modelName] = [:] }
-                        modelData[modelName]?[dayDate] = (modelData[modelName]?[dayDate] ?? 0) + count
+                        let prev = modelData[modelName]?[dayDate] ?? 0
+                        modelData[modelName]?[dayDate] = prev + count
                     }
                 }
             }
@@ -348,7 +349,8 @@ final class DashboardViewModel: ObservableObject {
                 }
                 if dayTokens > 0 {
                     if modelData[modelName] == nil { modelData[modelName] = [:] }
-                    modelData[modelName]?[dayDate] = (modelData[modelName]?[dayDate] ?? 0) + dayTokens
+                    let prev = modelData[modelName]?[dayDate] ?? 0
+                    modelData[modelName]?[dayDate] = prev + dayTokens
                 }
             }
         }
