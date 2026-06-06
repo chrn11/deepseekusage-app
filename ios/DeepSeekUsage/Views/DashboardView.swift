@@ -18,10 +18,14 @@ struct DashboardView: View {
                     balanceCard
                     rechargeButton
                     quickStats
+                    utcInfoLabel
                     if vm.isLoggedIn { monthSelector }
                     if !vm.modelBreakdown.isEmpty { modelChart }
                     if !vm.ioByDay.isEmpty      { ioChart }
                     if !vm.costByDay.isEmpty { costChart }
+                    if !vm.costByDayUSD.isEmpty { costChartUSD }
+                    if !vm.requestsByModelAndDay.isEmpty { requestCharts }
+                    if !vm.tokensByModelAndDay.isEmpty { tokenCharts }
                     if !vm.isLoggedIn { loginBanner }
                 }
                 .padding(.horizontal, 16)
@@ -245,6 +249,13 @@ struct DashboardView: View {
     }
 
     private var mLabel: String { vm.selectedYM == YearMonth.current ? "本月" : "\(vm.selectedYM.month)月" }
+    
+    private var utcInfoLabel: some View {
+        Text("所有日期均按 UTC 时间显示，数据可能有 5 分钟延迟。")
+            .font(.system(size: 11))
+            .foregroundColor(Color(hex: "5C6E82"))
+            .frame(maxWidth: .infinity, alignment: .center)
+    }
 
     private func statPill(_ title: String, _ val: String, _ icon: String, _ color: Color) -> some View {
         HStack(spacing: 8) {
@@ -445,6 +456,116 @@ struct DashboardView: View {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+    
+    // ═══════════════════════════════
+    // 费用 USD
+    // ═══════════════════════════════
+
+    private var costChartUSD: some View {
+        let costs = vm.costByDayUSD
+        let total = costs.map(\.cost).reduce(0, +)
+        let avg   = costs.isEmpty ? 0 : total / Double(costs.count)
+        let peak  = costs.map(\.cost).max() ?? 0
+
+        return panel("每日费用 (USD)", "月合计 $\(String(format: "%.2f", total))") {
+            HStack(spacing: 12) {
+                KpiChip(title: "总计", value: String(format: "$%.2f", total), color: Color(hex: "7C5CFC"))
+                KpiChip(title: "峰值", value: String(format: "$%.2f", peak), color: Color(hex: "FFD93D"))
+                KpiChip(title: "日均", value: String(format: "$%.2f", avg),  color: Color(hex: "00C6FF"))
+            }
+
+            Chart(costs) { item in
+                AreaMark(x: .value("", item.formattedDate), y: .value("", item.cost))
+                    .foregroundStyle(LinearGradient(colors: [Color(hex: "7C5CFC").opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
+                LineMark(x: .value("", item.formattedDate), y: .value("", item.cost))
+                    .foregroundStyle(LinearGradient(colors: [Color(hex: "7C5CFC"), Color(hex: "00C6FF")], startPoint: .leading, endPoint: .trailing))
+                    .lineStyle(StrokeStyle(lineWidth: 2.5))
+                PointMark(x: .value("", item.formattedDate), y: .value("", item.cost))
+                    .foregroundStyle(Color(hex: "7C5CFC")).symbolSize(28)
+                RuleMark(y: .value("均值", avg))
+                    .foregroundStyle(Color(hex: "FFD93D").opacity(0.5))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                    .annotation(position: .top, alignment: .trailing) {
+                        Text("均值 $\(String(format: "%.2f", avg))").font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color(hex: "FFD93D"))
+                    }
+            }
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .day, count: 5)) { AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11)) }
+            }
+            .chartYAxis {
+                AxisMarks { AxisGridLine().foregroundStyle(.white.opacity(0.04)) }
+            }
+            .chartPlotStyle { $0.background(Color.clear) }
+            .frame(height: 210)
+        }
+    }
+    
+    // ═══════════════════════════════
+    // API 请求次数图表（按模型分组）
+    // ═══════════════════════════════
+    
+    private var requestCharts: some View {
+        VStack(spacing: 20) {
+            ForEach(Array(vm.requestsByModelAndDay.enumerated()), id: \.element.id) { index, modelData in
+                let color = modelColors[index % modelColors.count]
+                let totalStr = fmtTok(modelData.total)
+                
+                panel(modelData.model, "\(totalStr)次") {
+                    Chart(modelData.days) { day in
+                        AreaMark(x: .value("", day.shortDate), y: .value("", day.value))
+                            .foregroundStyle(LinearGradient(colors: [color.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
+                        LineMark(x: .value("", day.shortDate), y: .value("", day.value))
+                            .foregroundStyle(color)
+                            .lineStyle(StrokeStyle(lineWidth: 2))
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .stride(by: .day, count: 5)) { 
+                            AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11)) 
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks { AxisGridLine().foregroundStyle(.white.opacity(0.04)) }
+                    }
+                    .chartPlotStyle { $0.background(Color.clear) }
+                    .frame(height: 140)
+                }
+            }
+        }
+    }
+    
+    // ═══════════════════════════════
+    // Token 使用量图表（按模型分组）
+    // ═══════════════════════════════
+    
+    private var tokenCharts: some View {
+        VStack(spacing: 20) {
+            ForEach(Array(vm.tokensByModelAndDay.enumerated()), id: \.element.id) { index, modelData in
+                let color = modelColors[index % modelColors.count]
+                let totalStr = fmtTok(modelData.total)
+                
+                panel(modelData.model, "\(totalStr)") {
+                    Chart(modelData.days) { day in
+                        AreaMark(x: .value("", day.shortDate), y: .value("", day.value))
+                            .foregroundStyle(LinearGradient(colors: [color.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
+                        LineMark(x: .value("", day.shortDate), y: .value("", day.value))
+                            .foregroundStyle(color)
+                            .lineStyle(StrokeStyle(lineWidth: 2))
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .stride(by: .day, count: 5)) { 
+                            AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11)) 
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks { AxisGridLine().foregroundStyle(.white.opacity(0.04)) }
+                    }
+                    .chartPlotStyle { $0.background(Color.clear) }
+                    .frame(height: 140)
                 }
             }
         }

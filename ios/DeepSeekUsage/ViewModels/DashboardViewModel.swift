@@ -152,10 +152,12 @@ final class DashboardViewModel: ObservableObject {
     // MARK: - 计算
 
     func computeStats() {
-        let cal = Calendar.current; let now = Date()
-        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+        let now = Date()
+        // API 返回 UTC 日期，必须用 UTC 时区匹配
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.timeZone = TimeZone(identifier: "UTC")
         let todayStr = df.string(from: now)
-        let weekStart = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
+        var utcCal = Calendar(identifier: .gregorian); utcCal.timeZone = TimeZone(identifier: "UTC")!
+        let weekStart = utcCal.date(from: utcCal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
 
         // 从费用数据算每日消费（优先 CNY 组，其次取第一个组）
         var totalCost: Double = 0; var todayCost: Double = 0; var weekCost: Double = 0
@@ -266,6 +268,21 @@ final class DashboardViewModel: ObservableObject {
         }.sorted { $0.date < $1.date }
     }
 
+    /// 费用每日聚合（使用 USD 组的数据）
+    var costByDayUSD: [DailyCost] {
+        let usdGroup = allCostGroups.first(where: { $0.currency == "USD" })
+        return (usdGroup?.days ?? []).compactMap { day in
+            guard let models = day.data else { return nil }
+            var total: Double = 0
+            for m in models {
+                for u in (m.usage ?? []) {
+                    total += Double(u.amount ?? "0") ?? 0
+                }
+            }
+            return DailyCost(date: day.date ?? "", cost: total)
+        }.sorted { $0.date < $1.date }
+    }
+
     /// 模型费用明细（按模型分组，使用 CNY 组的总数据）
     var costModelBreakdown: [ModelCostDetail] {
         let cnyGroup = allCostGroups.first(where: { $0.currency == "CNY" }) ?? allCostGroups.first
@@ -284,6 +301,66 @@ final class DashboardViewModel: ObservableObject {
             
             return ModelCostDetail(model: name, totalCost: total, details: details)
         }.sorted { $0.totalCost > $1.totalCost }
+    }
+    
+    /// 按模型+天分组的 API 请求次数（取前5个模型）
+    var requestsByModelAndDay: [ModelDayData] {
+        var modelData: [String: [String: Int]] = [:] // model -> date -> count
+        
+        for day in allAmounts {
+            guard let dayDate = day.date, let models = day.data else { continue }
+            for m in models {
+                guard let modelName = m.model else { continue }
+                for u in (m.usage ?? []) {
+                    if u.type == "REQUEST" {
+                        let count = Int(u.amount ?? "0") ?? 0
+                        if modelData[modelName] == nil { modelData[modelName] = [:] }
+                        modelData[modelName]?[dayDate] = (modelData[modelName]?[dayDate] ?? 0) + count
+                    }
+                }
+            }
+        }
+        
+        // 按 day 排序并取前5个模型
+        let sortedModels = modelData.map { (model, dateMap) -> (model: String, total: Int, days: [DayValue]) in
+            let sortedDays = dateMap.sorted { $0.key < $1.key }.map { DayValue(date: $0.key, value: $0.value) }
+            let total = sortedDays.map(\.value).reduce(0, +)
+            return (model: model, total: total, days: sortedDays)
+        }.sorted { $0.total > $1.total }.prefix(5)
+        
+        return sortedModels.map { ModelDayData(model: $0.model, days: $0.days) }
+    }
+    
+    /// 按模型+天分组的 Token 数（取前5个模型）
+    var tokensByModelAndDay: [ModelDayData] {
+        var modelData: [String: [String: Int]] = [:] // model -> date -> tokens
+        
+        for day in allAmounts {
+            guard let dayDate = day.date, let models = day.data else { continue }
+            for m in models {
+                guard let modelName = m.model else { continue }
+                var dayTokens = 0
+                for u in (m.usage ?? []) {
+                    let t = u.type ?? ""
+                    if t != "REQUEST" {
+                        dayTokens += Int(u.amount ?? "0") ?? 0
+                    }
+                }
+                if dayTokens > 0 {
+                    if modelData[modelName] == nil { modelData[modelName] = [:] }
+                    modelData[modelName]?[dayDate] = (modelData[modelName]?[dayDate] ?? 0) + dayTokens
+                }
+            }
+        }
+        
+        // 按 day 排序并取前5个模型
+        let sortedModels = modelData.map { (model, dateMap) -> (model: String, total: Int, days: [DayValue]) in
+            let sortedDays = dateMap.sorted { $0.key < $1.key }.map { DayValue(date: $0.key, value: $0.value) }
+            let total = sortedDays.map(\.value).reduce(0, +)
+            return (model: model, total: total, days: sortedDays)
+        }.sorted { $0.total > $1.total }.prefix(5)
+        
+        return sortedModels.map { ModelDayData(model: $0.model, days: $0.days) }
     }
 
     // MARK: - fmt
@@ -331,12 +408,31 @@ struct CostDetail: Identifiable {
 struct DailyCost: Identifiable {
     let id = UUID(); let date: String; let cost: Double
     var formattedDate: String { date.count >= 10 ? String(date.suffix(5)) : date }
-    var formattedCost: String { String(format: "¥%.2f", cost) }
+    var formattedCostCNY: String { String(format: "¥%.2f", cost) }
+    var formattedCostUSD: String { String(format: "$%.2f", cost) }
 }
 
 struct IOPair: Identifiable {
     let id = UUID(); let date: String; let input: Int; let output: Int
     var shortDate: String { date.count >= 10 ? String(date.suffix(5)) : date }
+}
+
+// MARK: - 按模型每日数据
+
+/// 每日数值数据
+struct DayValue: Identifiable {
+    let id = UUID()
+    let date: String
+    let value: Int
+    var shortDate: String { date.count >= 10 ? String(date.suffix(5)) : date }
+}
+
+/// 模型每日数据
+struct ModelDayData: Identifiable {
+    let id = UUID()
+    let model: String
+    let days: [DayValue]
+    var total: Int { days.map(\.value).reduce(0, +) }
 }
 
 // MARK: - YearMonth
