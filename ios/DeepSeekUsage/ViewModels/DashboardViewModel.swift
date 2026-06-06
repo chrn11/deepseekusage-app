@@ -303,66 +303,40 @@ final class DashboardViewModel: ObservableObject {
         }.sorted { $0.totalCost > $1.totalCost }
     }
     
-    /// 按模型+天分组的 API 请求次数（取前5个模型）
-    var requestsByModelAndDay: [ModelDayData] {
-        var modelData: [String: [String: Int]] = [:] // model -> date -> count
-        
+    /// 按模型聚合的图表数据（请求次数 + Token）
+    var modelCharts: [ModelChartData] {
+        var requestMap: [String: [String: Int]] = [:]
+        var tokenMap: [String: [String: Int]] = [:]
+
         for day in allAmounts {
             guard let dayDate = day.date, let models = day.data else { continue }
             for m in models {
                 guard let modelName = m.model else { continue }
-                for u in (m.usage ?? []) {
-                    if u.type == "REQUEST" {
-                        let count = Int(u.amount ?? "0") ?? 0
-                        if modelData[modelName] == nil { modelData[modelName] = [:] }
-                        let prev = modelData[modelName]?[dayDate] ?? 0
-                        modelData[modelName]?[dayDate] = prev + count
-                    }
-                }
-            }
-        }
-        
-        // 按 day 排序并取前5个模型
-        let sortedModels = modelData.map { (model, dateMap) -> (model: String, total: Int, days: [DayValue]) in
-            let sortedDays = dateMap.sorted { $0.key < $1.key }.map { DayValue(date: $0.key, value: $0.value) }
-            let total = sortedDays.map(\.value).reduce(0, +)
-            return (model: model, total: total, days: sortedDays)
-        }.sorted { $0.total > $1.total }.prefix(5)
-        
-        return sortedModels.map { ModelDayData(model: $0.model, days: $0.days) }
-    }
-    
-    /// 按模型+天分组的 Token 数（取前5个模型）
-    var tokensByModelAndDay: [ModelDayData] {
-        var modelData: [String: [String: Int]] = [:] // model -> date -> tokens
-        
-        for day in allAmounts {
-            guard let dayDate = day.date, let models = day.data else { continue }
-            for m in models {
-                guard let modelName = m.model else { continue }
-                var dayTokens = 0
                 for u in (m.usage ?? []) {
                     let t = u.type ?? ""
-                    if t != "REQUEST" {
-                        dayTokens += Int(u.amount ?? "0") ?? 0
+                    let amt = Int(u.amount ?? "0") ?? 0
+                    if t == "REQUEST" {
+                        if requestMap[modelName] == nil { requestMap[modelName] = [:] }
+                        let prev = requestMap[modelName]?[dayDate] ?? 0
+                        requestMap[modelName]?[dayDate] = prev + amt
+                    } else {
+                        if tokenMap[modelName] == nil { tokenMap[modelName] = [:] }
+                        let prev = tokenMap[modelName]?[dayDate] ?? 0
+                        tokenMap[modelName]?[dayDate] = prev + amt
                     }
-                }
-                if dayTokens > 0 {
-                    if modelData[modelName] == nil { modelData[modelName] = [:] }
-                    let prev = modelData[modelName]?[dayDate] ?? 0
-                    modelData[modelName]?[dayDate] = prev + dayTokens
                 }
             }
         }
-        
-        // 按 day 排序并取前5个模型
-        let sortedModels = modelData.map { (model, dateMap) -> (model: String, total: Int, days: [DayValue]) in
-            let sortedDays = dateMap.sorted { $0.key < $1.key }.map { DayValue(date: $0.key, value: $0.value) }
-            let total = sortedDays.map(\.value).reduce(0, +)
-            return (model: model, total: total, days: sortedDays)
-        }.sorted { $0.total > $1.total }.prefix(5)
-        
-        return sortedModels.map { ModelDayData(model: $0.model, days: $0.days) }
+
+        let allModels = Set(requestMap.keys).union(tokenMap.keys)
+        let sorted = allModels.map { model -> (model: String, totalTokens: Int, reqDays: [DayValue], tokDays: [DayValue]) in
+            let reqDays = (requestMap[model] ?? [:]).sorted { $0.key < $1.key }.map { DayValue(date: $0.key, value: $0.value) }
+            let tokDays = (tokenMap[model] ?? [:]).sorted { $0.key < $1.key }.map { DayValue(date: $0.key, value: $0.value) }
+            let totalTokens = tokDays.map(\.value).reduce(0, +)
+            return (model: model, totalTokens: totalTokens, reqDays: reqDays, tokDays: tokDays)
+        }.sorted { $0.totalTokens > $1.totalTokens }.prefix(5)
+
+        return sorted.map { ModelChartData(model: $0.model, requestDays: $0.reqDays, tokenDays: $0.tokDays) }
     }
 
     // MARK: - fmt
@@ -435,6 +409,16 @@ struct ModelDayData: Identifiable {
     let model: String
     let days: [DayValue]
     var total: Int { days.map(\.value).reduce(0, +) }
+}
+
+/// 按模型聚合的请求+Token 图表数据
+struct ModelChartData: Identifiable {
+    let id = UUID()
+    let model: String
+    let requestDays: [DayValue]
+    let tokenDays: [DayValue]
+    var totalRequests: Int { requestDays.map(\.value).reduce(0, +) }
+    var totalTokens: Int { tokenDays.map(\.value).reduce(0, +) }
 }
 
 // MARK: - YearMonth
