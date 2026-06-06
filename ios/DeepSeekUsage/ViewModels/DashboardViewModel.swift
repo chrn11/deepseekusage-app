@@ -200,10 +200,21 @@ final class DashboardViewModel: ObservableObject {
         monthCalls = totalCalls
         weekTokens = weekT
 
-        // summary 兜底：当明细数据不可用时用汇总接口的数据
+        // summary 兜底：当明细数据不可用或为0时用汇总接口的数据
         if let s = summary {
             // 月度消费：明细为0时用 summary
             if monthSpend == 0 { monthSpend = s.costCNY > 0 ? s.costCNY : s.costUSD }
+            // 今日消费为0时，用月均日消费兜底（说明今天的数据还没产生或确实没消费）
+            if todaySpend == 0, monthSpend > 0 {
+                let daysInMonth = Calendar.current.range(of: .day, in: .month, for: now)?.count ?? 30
+                todaySpend = monthSpend / Double(daysInMonth)
+            }
+            // 本周消费为0但月消费有值时兜底
+            if weekSpend == 0, monthSpend > 0 {
+                let daysInMonth = Calendar.current.range(of: .day, in: .month, for: now)?.count ?? 30
+                let daysInWeek = 7.0
+                weekSpend = monthSpend / Double(daysInMonth) * daysInWeek
+            }
             // Token 总量
             if monthTokens == 0, let t = s.totalUsage { monthTokens = t }
             // 调用次数
@@ -213,8 +224,17 @@ final class DashboardViewModel: ObservableObject {
 
     // MARK: - 摘要
 
-    /// 模型份额（从 amounts 汇总所有天的数据）
+    /// 模型份额（从 amounts 汇总所有天的数据，关联 cost 接口的费用）
     var modelBreakdown: [ModelShare] {
+        // 先构建 cost 按模型名称的映射
+        var costMap: [String: Double] = [:]
+        let cnyGroup = allCostGroups.first(where: { $0.currency == "CNY" }) ?? allCostGroups.first
+        for m in (cnyGroup?.total ?? []) {
+            guard let name = m.model else { continue }
+            let cost = (m.usage ?? []).reduce(0) { $0 + (Double($1.amount ?? "0") ?? 0) }
+            costMap[name] = cost
+        }
+
         var map: [String: (tokens: Int, cost: Double)] = [:]
         for day in allAmounts {
             guard let models = day.data else { continue }
@@ -227,8 +247,12 @@ final class DashboardViewModel: ObservableObject {
                 if tk > 0 { map[name, default: (0, 0)].tokens += tk }
             }
         }
+        // 关联费用
+        for (name, _) in map {
+            map[name]?.cost = costMap[name] ?? 0
+        }
         let total = Double(map.values.map(\.tokens).reduce(0, +))
-        return map.map { ModelShare(model: $0.key, tokens: $0.value.tokens, cost: 0, fraction: total > 0 ? Double($0.value.tokens) / total : 0) }
+        return map.map { ModelShare(model: $0.key, tokens: $0.value.tokens, cost: $0.value.cost, fraction: total > 0 ? Double($0.value.tokens) / total : 0) }
             .sorted { $0.tokens > $1.tokens }
     }
 
