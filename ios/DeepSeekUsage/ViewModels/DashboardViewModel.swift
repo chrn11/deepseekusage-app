@@ -199,27 +199,6 @@ final class DashboardViewModel: ObservableObject {
         monthTokens = totalTokens
         monthCalls = totalCalls
         weekTokens = weekT
-
-        // summary 兜底：当明细数据不可用或为0时用汇总接口的数据
-        if let s = summary {
-            // 月度消费：明细为0时用 summary
-            if monthSpend == 0 { monthSpend = s.costCNY > 0 ? s.costCNY : s.costUSD }
-            // 今日消费为0时，用月均日消费兜底（说明今天的数据还没产生或确实没消费）
-            if todaySpend == 0, monthSpend > 0 {
-                let daysInMonth = Calendar.current.range(of: .day, in: .month, for: now)?.count ?? 30
-                todaySpend = monthSpend / Double(daysInMonth)
-            }
-            // 本周消费为0但月消费有值时兜底
-            if weekSpend == 0, monthSpend > 0 {
-                let daysInMonth = Calendar.current.range(of: .day, in: .month, for: now)?.count ?? 30
-                let daysInWeek = 7.0
-                weekSpend = monthSpend / Double(daysInMonth) * daysInWeek
-            }
-            // Token 总量
-            if monthTokens == 0, let t = s.totalUsage { monthTokens = t }
-            // 调用次数
-            if monthCalls == 0, let t = s.monthlyTokenUsage.flatMap(Int.init) { monthCalls = t }
-        }
     }
 
     // MARK: - 摘要
