@@ -93,6 +93,7 @@ final class DashboardViewModel: ObservableObject {
 
     private func loadPlatform() async {
         guard isLoggedIn else { return }
+        let m = currentMonth; let y = currentYear
 
         // 汇总 — 带 1 次重试
         do { summary = try await fetchWithRetry { try await PlatformAPI.fetchUsageSummary() } }
@@ -100,7 +101,7 @@ final class DashboardViewModel: ObservableObject {
 
         // 用量
         do {
-            let data = try await fetchWithRetry { try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear) }
+            let data = try await fetchWithRetry { try await PlatformAPI.fetchUsageAmount(month: m, year: y) }
             allAmounts = data.days ?? []
         } catch {
             allAmounts = []
@@ -110,7 +111,7 @@ final class DashboardViewModel: ObservableObject {
 
         // 费用
         do {
-            let groups = try await fetchWithRetry { try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear) }
+            let groups = try await fetchWithRetry { try await PlatformAPI.fetchUsageCost(month: m, year: y) }
             allCostGroups = groups
         } catch {
             allCostGroups = []
@@ -146,12 +147,13 @@ final class DashboardViewModel: ObservableObject {
 
     func selectMonth(_ ym: YearMonth) {
         currentYear = ym.year; currentMonth = ym.month
+        let m = currentMonth; let y = currentYear
         Task {
             isLoading = true
             do { summary = try await fetchWithRetry { try await PlatformAPI.fetchUsageSummary() } } catch { print("[Dashboard] selectMonth summary: \(error)") }
-            do { allCostGroups   = try await fetchWithRetry { try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear) } }
+            do { allCostGroups   = try await fetchWithRetry { try await PlatformAPI.fetchUsageCost(month: m, year: y) } }
             catch { allCostGroups = []; errorMessage = "费用数据加载失败：\(error.localizedDescription)" }
-            do { allAmounts = (try await fetchWithRetry { try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear) }).days ?? [] }
+            do { allAmounts = (try await fetchWithRetry { try await PlatformAPI.fetchUsageAmount(month: m, year: y) }).days ?? [] }
             catch { allAmounts = []; errorMessage = "用量数据加载失败：\(error.localizedDescription)" }
             computeStats()
             isLoading = false
