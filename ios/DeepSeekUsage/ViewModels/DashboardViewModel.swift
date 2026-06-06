@@ -32,6 +32,20 @@ final class DashboardViewModel: ObservableObject {
     @Published var monthCalls: Int = 0
     @Published var weekTokens: Int = 0
 
+    // MARK: - 缓存的计算属性（computeStats 时更新，避免重复计算）
+    @Published var cachedCostByDay: [DailyCost] = []
+    @Published var cachedCostByDayUSD: [DailyCost] = []
+    @Published var cachedModelBreakdown: [ModelShare] = []
+    @Published var cachedIOByDay: [IOPair] = []
+    @Published var cachedModelCharts: [ModelChartData] = []
+    @Published var cachedModelCostBreakdown: [ModelCostDetail] = []
+
+    // MARK: - 余额预警
+    @Published var alertThreshold: Double {
+        didSet { UserDefaults.standard.set(alertThreshold, forKey: "balance_alert_threshold") }
+    }
+    var alertEnabled: Bool { alertThreshold > 0 }
+
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -42,6 +56,7 @@ final class DashboardViewModel: ObservableObject {
         let cal = Calendar.current
         currentYear  = cal.component(.year, from: now)
         currentMonth = cal.component(.month, from: now)
+        alertThreshold = UserDefaults.standard.double(forKey: "balance_alert_threshold")
     }
 
     // MARK: - 加载
@@ -79,13 +94,13 @@ final class DashboardViewModel: ObservableObject {
     private func loadPlatform() async {
         guard isLoggedIn else { return }
 
-        // 汇总
-        do { summary = try await PlatformAPI.fetchUsageSummary() }
+        // 汇总 — 带 1 次重试
+        do { summary = try await fetchWithRetry { try await PlatformAPI.fetchUsageSummary() } }
         catch { print("[Dashboard] summary 失败: \(error)") }
 
-        // 用量 (当前月)
+        // 用量
         do {
-            let data = try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear)
+            let data = try await fetchWithRetry { try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear) }
             allAmounts = data.days ?? []
         } catch {
             allAmounts = []
@@ -93,9 +108,9 @@ final class DashboardViewModel: ObservableObject {
             if errorMessage == nil { errorMessage = "用量数据加载失败：\(error.localizedDescription)" }
         }
 
-        // 费用 (当前月) — 接口按币种返回多组数据
+        // 费用
         do {
-            let groups = try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear)
+            let groups = try await fetchWithRetry { try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear) }
             allCostGroups = groups
         } catch {
             allCostGroups = []
@@ -104,6 +119,18 @@ final class DashboardViewModel: ObservableObject {
         }
 
         refreshAvailableMonths()
+    }
+
+    /// 带 1 次重试的 fetch（仅重试非认证/非 4xx 错误）
+    private func fetchWithRetry<T>(_ f: @escaping () async throws -> T) async throws -> T {
+        do { return try await f() }
+        catch {
+            if let pe = error as? PlatformError, case .notLoggedIn = pe { throw error }
+            if let pe = error as? PlatformError, case .loginExpired = pe { throw error }
+            // 等 1.5s 重试一次
+            try await Task.sleep(nanoseconds: 1_500_000_000)
+            return try await f()
+        }
     }
 
     // MARK: - 月份切换
@@ -119,13 +146,12 @@ final class DashboardViewModel: ObservableObject {
 
     func selectMonth(_ ym: YearMonth) {
         currentYear = ym.year; currentMonth = ym.month
-        // 切月份需要重新拉数据
         Task {
             isLoading = true
-            do { summary = try await PlatformAPI.fetchUsageSummary() } catch { print("[Dashboard] selectMonth summary: \(error)") }
-            do { allCostGroups   = try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear) }
+            do { summary = try await fetchWithRetry { try await PlatformAPI.fetchUsageSummary() } } catch { print("[Dashboard] selectMonth summary: \(error)") }
+            do { allCostGroups   = try await fetchWithRetry { try await PlatformAPI.fetchUsageCost(month: currentMonth, year: currentYear) } }
             catch { allCostGroups = []; errorMessage = "费用数据加载失败：\(error.localizedDescription)" }
-            do { allAmounts = (try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear)).days ?? [] }
+            do { allAmounts = (try await fetchWithRetry { try await PlatformAPI.fetchUsageAmount(month: currentMonth, year: currentYear) }).days ?? [] }
             catch { allAmounts = []; errorMessage = "用量数据加载失败：\(error.localizedDescription)" }
             computeStats()
             isLoading = false
@@ -153,13 +179,12 @@ final class DashboardViewModel: ObservableObject {
 
     func computeStats() {
         let now = Date()
-        // API 返回 UTC 日期，必须用 UTC 时区匹配
         let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.timeZone = TimeZone(identifier: "UTC")
         let todayStr = df.string(from: now)
         var utcCal = Calendar(identifier: .gregorian); utcCal.timeZone = TimeZone(identifier: "UTC")!
         let weekStart = utcCal.date(from: utcCal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
 
-        // 从费用数据算每日消费（优先 CNY 组，其次取第一个组）
+        // 费用统计
         var totalCost: Double = 0; var todayCost: Double = 0; var weekCost: Double = 0
         var totalTokens: Int = 0; var weekT: Int = 0; var totalCalls: Int = 0
         let costGroup = allCostGroups.first(where: { $0.currency == "CNY" }) ?? allCostGroups.first
@@ -189,154 +214,109 @@ final class DashboardViewModel: ObservableObject {
                     else { dTokens += amt }
                 }
                 totalTokens += dTokens; totalCalls += dCalls
-                if let d = df.date(from: day.date ?? ""), d >= weekStart {
-                    weekT += dTokens
-                }
+                if let d = df.date(from: day.date ?? ""), d >= weekStart { weekT += dTokens }
             }
         }
 
-        todaySpend = todayCost
-        weekSpend = weekCost
-        monthSpend = totalCost
-        monthTokens = totalTokens
-        monthCalls = totalCalls
-        weekTokens = weekT
+        todaySpend = todayCost; weekSpend = weekCost; monthSpend = totalCost
+        monthTokens = totalTokens; monthCalls = totalCalls; weekTokens = weekT
+
+        // 缓存所有派生数据
+        cachedCostByDay = computeCostByDay()
+        cachedCostByDayUSD = computeCostByDayUSD()
+        cachedModelBreakdown = computeModelBreakdown()
+        cachedIOByDay = computeIOByDay()
+        cachedModelCharts = computeModelCharts()
+        cachedModelCostBreakdown = computeModelCostBreakdown()
     }
 
-    // MARK: - 摘要
+    // MARK: - 摘要（一次计算缓存）
 
-    /// 模型份额（从 amounts 汇总所有天的数据，关联 cost 接口的费用）
-    var modelBreakdown: [ModelShare] {
-        // 先构建 cost 按模型名称的映射
+    private func computeModelBreakdown() -> [ModelShare] {
         var costMap: [String: Double] = [:]
         let cnyGroup = allCostGroups.first(where: { $0.currency == "CNY" }) ?? allCostGroups.first
         for m in (cnyGroup?.total ?? []) {
             guard let name = m.model else { continue }
-            let cost = (m.usage ?? []).reduce(0) { $0 + (Double($1.amount ?? "0") ?? 0) }
-            costMap[name] = cost
+            costMap[name] = (m.usage ?? []).reduce(0) { $0 + (Double($1.amount ?? "0") ?? 0) }
         }
-
         var map: [String: (tokens: Int, cost: Double)] = [:]
         for day in allAmounts {
-            guard let models = day.data else { continue }
-            for m in models {
-                let name = m.model ?? "Unknown"
-                var tk = 0
-                for u in (m.usage ?? []) {
-                    if u.type != "REQUEST" { tk += Int(u.amount ?? "0") ?? 0 }
-                }
+            for m in (day.data ?? []) {
+                let name = m.model ?? "Unknown"; var tk = 0
+                for u in (m.usage ?? []) { if u.type != "REQUEST" { tk += Int(u.amount ?? "0") ?? 0 } }
                 if tk > 0 { map[name, default: (0, 0)].tokens += tk }
             }
         }
-        // 关联费用
-        for (name, _) in map {
-            map[name]?.cost = costMap[name] ?? 0
-        }
+        for (name, _) in map { map[name]?.cost = costMap[name] ?? 0 }
         let total = Double(map.values.map(\.tokens).reduce(0, +))
         return map.map { ModelShare(model: $0.key, tokens: $0.value.tokens, cost: $0.value.cost, fraction: total > 0 ? Double($0.value.tokens) / total : 0) }
             .sorted { $0.tokens > $1.tokens }
     }
 
-    /// I/O 每日聚合
-    var ioByDay: [IOPair] {
+    private func computeIOByDay() -> [IOPair] {
         allAmounts.compactMap { day in
             guard let models = day.data else { return nil }
             var input = 0; var output = 0
-            for m in models {
-                for u in (m.usage ?? []) {
-                    let t = u.type ?? ""; let a = Int(u.amount ?? "0") ?? 0
-                    if t.contains("RESPONSE") { output += a }
-                    else { input += a } // PROMPT_TOKEN, CACHE_HIT/MISS
-                }
-            }
+            for m in models { for u in (m.usage ?? []) {
+                let t = u.type ?? ""; let a = Int(u.amount ?? "0") ?? 0
+                t.contains("RESPONSE") ? (output += a) : (input += a)
+            }}
             return IOPair(date: day.date ?? "", input: input, output: output)
         }.sorted { $0.date < $1.date }
     }
 
-    /// 费用每日聚合（使用 CNY 组的数据）
-    var costByDay: [DailyCost] {
-        let cnyGroup = allCostGroups.first(where: { $0.currency == "CNY" }) ?? allCostGroups.first
-        return (cnyGroup?.days ?? []).compactMap { day in
+    private func computeCostByDay() -> [DailyCost] {
+        (allCostGroups.first(where: { $0.currency == "CNY" }) ?? allCostGroups.first)?.days?.compactMap { day in
             guard let models = day.data else { return nil }
-            var total: Double = 0
-            for m in models {
-                for u in (m.usage ?? []) {
-                    total += Double(u.amount ?? "0") ?? 0
-                }
-            }
+            let total = models.flatMap { $0.usage ?? [] }.reduce(0) { $0 + (Double($1.amount ?? "0") ?? 0) }
             return DailyCost(date: day.date ?? "", cost: total)
-        }.sorted { $0.date < $1.date }
+        }.sorted { $0.date < $1.date } ?? []
     }
 
-    /// 费用每日聚合（使用 USD 组的数据）
-    var costByDayUSD: [DailyCost] {
-        let usdGroup = allCostGroups.first(where: { $0.currency == "USD" })
-        return (usdGroup?.days ?? []).compactMap { day in
+    private func computeCostByDayUSD() -> [DailyCost] {
+        allCostGroups.first(where: { $0.currency == "USD" })?.days?.compactMap { day in
             guard let models = day.data else { return nil }
-            var total: Double = 0
-            for m in models {
-                for u in (m.usage ?? []) {
-                    total += Double(u.amount ?? "0") ?? 0
-                }
-            }
+            let total = models.flatMap { $0.usage ?? [] }.reduce(0) { $0 + (Double($1.amount ?? "0") ?? 0) }
             return DailyCost(date: day.date ?? "", cost: total)
-        }.sorted { $0.date < $1.date }
+        }.sorted { $0.date < $1.date } ?? []
     }
 
-    /// 模型费用明细（按模型分组，使用 CNY 组的总数据）
-    var costModelBreakdown: [ModelCostDetail] {
-        let cnyGroup = allCostGroups.first(where: { $0.currency == "CNY" }) ?? allCostGroups.first
-        guard let models = cnyGroup?.total else { return [] }
-        
-        return models.compactMap { m -> ModelCostDetail? in
+    private func computeModelCostBreakdown() -> [ModelCostDetail] {
+        (allCostGroups.first(where: { $0.currency == "CNY" }) ?? allCostGroups.first)?.total?.compactMap { m in
             guard let name = m.model else { return nil }
-            var total: Double = 0
-            var details: [CostDetail] = []
-            
+            var total: Double = 0; var details: [CostDetail] = []
             for u in (m.usage ?? []) {
-                let amt = Double(u.amount ?? "0") ?? 0
-                total += amt
+                let amt = Double(u.amount ?? "0") ?? 0; total += amt
                 details.append(CostDetail(type: u.type ?? "未知", amount: amt))
             }
-            
             return ModelCostDetail(model: name, totalCost: total, details: details)
-        }.sorted { $0.totalCost > $1.totalCost }
+        }.sorted { $0.totalCost > $1.totalCost } ?? []
     }
-    
-    /// 按模型聚合的图表数据（请求次数 + Token）
-    var modelCharts: [ModelChartData] {
-        var requestMap: [String: [String: Int]] = [:]
-        var tokenMap: [String: [String: Int]] = [:]
 
+    private func computeModelCharts() -> [ModelChartData] {
+        var reqMap: [String: [String: Int]] = [:]; var tokMap: [String: [String: Int]] = [:]
         for day in allAmounts {
-            guard let dayDate = day.date, let models = day.data else { continue }
+            guard let dd = day.date, let models = day.data else { continue }
             for m in models {
-                guard let modelName = m.model else { continue }
+                guard let name = m.model else { continue }
                 for u in (m.usage ?? []) {
-                    let t = u.type ?? ""
-                    let amt = Int(u.amount ?? "0") ?? 0
+                    let t = u.type ?? ""; let amt = Int(u.amount ?? "0") ?? 0
                     if t == "REQUEST" {
-                        if requestMap[modelName] == nil { requestMap[modelName] = [:] }
-                        let prev = requestMap[modelName]?[dayDate] ?? 0
-                        requestMap[modelName]?[dayDate] = prev + amt
+                        if reqMap[name] == nil { reqMap[name] = [:] }
+                        reqMap[name]?[dd] = (reqMap[name]?[dd] ?? 0) + amt
                     } else {
-                        if tokenMap[modelName] == nil { tokenMap[modelName] = [:] }
-                        let prev = tokenMap[modelName]?[dayDate] ?? 0
-                        tokenMap[modelName]?[dayDate] = prev + amt
+                        if tokMap[name] == nil { tokMap[name] = [:] }
+                        tokMap[name]?[dd] = (tokMap[name]?[dd] ?? 0) + amt
                     }
                 }
             }
         }
-
-        let allModels = Set(requestMap.keys).union(tokenMap.keys)
-        let sorted = allModels.map { model -> (model: String, totalTokens: Int, reqDays: [DayValue], tokDays: [DayValue]) in
-            let reqDays = (requestMap[model] ?? [:]).sorted { $0.key < $1.key }.map { DayValue(date: $0.key, value: $0.value) }
-            let tokDays = (tokenMap[model] ?? [:]).sorted { $0.key < $1.key }.map { DayValue(date: $0.key, value: $0.value) }
-            let totalTokens = tokDays.map(\.value).reduce(0, +)
-            return (model: model, totalTokens: totalTokens, reqDays: reqDays, tokDays: tokDays)
-        }.sorted { $0.totalTokens > $1.totalTokens }.prefix(5)
-
-        return sorted.map { ModelChartData(model: $0.model, requestDays: $0.reqDays, tokenDays: $0.tokDays) }
+        let allModels = Set(reqMap.keys).union(tokMap.keys)
+        return allModels.map { model in
+            let req = (reqMap[model] ?? [:]).sorted(by: <).map { DayValue(date: $0.key, value: $0.value) }
+            let tok = (tokMap[model] ?? [:]).sorted(by: <).map { DayValue(date: $0.key, value: $0.value) }
+            return ModelChartData(model: model, requestDays: req, tokenDays: tok)
+        }.sorted { $0.totalTokens > $1.totalTokens }.prefix(5).map { $0 }
     }
 
     // MARK: - fmt

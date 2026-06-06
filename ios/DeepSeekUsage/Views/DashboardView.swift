@@ -20,11 +20,11 @@ struct DashboardView: View {
                     quickStats
                     utcInfoLabel
                     if vm.isLoggedIn { monthSelector }
-                    if !vm.modelBreakdown.isEmpty { modelChart }
-                    if !vm.ioByDay.isEmpty      { ioChart }
-                    if !vm.costByDay.isEmpty { costChart }
-                    if !vm.costByDayUSD.isEmpty { costChartUSD }
-                    if !vm.modelCharts.isEmpty { modelCharts }
+                    if !vm.cachedModelBreakdown.isEmpty { modelChart }
+                    if !vm.cachedIOByDay.isEmpty      { ioChart }
+                    if !vm.cachedCostByDay.isEmpty { costChart }
+                    if !vm.cachedCostByDayUSD.isEmpty { costChartUSD }
+                    if !vm.cachedModelCharts.isEmpty { modelCharts }
                     if !vm.isLoggedIn { loginBanner }
                 }
                 .padding(.horizontal, 16)
@@ -156,6 +156,19 @@ struct DashboardView: View {
                         .foregroundColor(Color(hex: "A0B0CC"))
                 }
 
+                // 余额不足预警
+                if vm.alertEnabled, let b = vm.balanceInfos.primary, b.totalBalanceValue <= vm.alertThreshold {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 12))
+                        Text("余额低于 ¥\(String(format: "%.0f", vm.alertThreshold))，建议充值")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(Color(hex: "FF6B6B"))
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Color(hex: "FF6B6B").opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+
                 // 充值/赠送（取主币种数据）
                 if let b = vm.balance {
                     HStack(spacing: 0) {
@@ -226,23 +239,20 @@ struct DashboardView: View {
     // ═══════════════════════════════
 
     private var quickStats: some View {
-        let pills: [(String, String, String, Color)] = [
-            ("今日", vm.formattedTodaySpend, "clock", Color(hex: "FF6B6B")),
-            ("本周", vm.formattedWeekSpend, "calendar.badge.clock", Color(hex: "00C6FF")),
-            (mLabel, vm.formattedMonthSpend, "calendar", Color(hex: "7C5CFC")),
+        let pills: [StatItem] = [
+            StatItem(id: "today",  title: "今日", value: vm.formattedTodaySpend, icon: "clock",                color: Color(hex: "FF6B6B")),
+            StatItem(id: "week",   title: "本周", value: vm.formattedWeekSpend,  icon: "calendar.badge.clock", color: Color(hex: "00C6FF")),
+            StatItem(id: "month",  title: mLabel, value: vm.formattedMonthSpend, icon: "calendar",              color: Color(hex: "7C5CFC")),
         ]
-        let callPill: (String, String, String, Color)? = vm.isLoggedIn
-            ? ("调用", "\(vm.monthCalls)次", "arrow.up.message", Color(hex: "00E6A0")) : nil
-        let tokenPill: (String, String, String, Color)? = vm.isLoggedIn
-            ? ("Token", vm.formattedMonthTokens, "bolt.fill", Color(hex: "FFD93D")) : nil
-
         var items = pills
-        if let cp = callPill { items.append(cp) }
-        if let tp = tokenPill { items.append(tp) }
+        if vm.isLoggedIn {
+            items.append(StatItem(id: "calls", title: "调用", value: "\(vm.monthCalls)次", icon: "arrow.up.message", color: Color(hex: "00E6A0")))
+            items.append(StatItem(id: "tokens", title: "Token", value: vm.formattedMonthTokens, icon: "bolt.fill", color: Color(hex: "FFD93D")))
+        }
 
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 10) {
-            ForEach(0..<items.count, id: \.self) { i in
-                statPill(items[i].0, items[i].1, items[i].2, items[i].3)
+            ForEach(items) { item in
+                statPill(item.title, item.value, item.icon, item.color)
             }
         }
     }
@@ -312,16 +322,16 @@ struct DashboardView: View {
     private var modelChart: some View {
         panel("模型用量", nil) {
             VStack(spacing: 16) {
-                NeonDonut(data: Array(vm.modelBreakdown.prefix(5)))
+                NeonDonut(data: Array(vm.cachedModelBreakdown.prefix(5)))
                     .frame(height: 170)
                     .overlay {
                         VStack(spacing: 2) {
-                            Text("\(vm.modelBreakdown.count)").font(.system(size: 34, weight: .bold)).foregroundColor(.white)
+                            Text("\(vm.cachedModelBreakdown.count)").font(.system(size: 34, weight: .bold)).foregroundColor(.white)
                             Text("个模型").font(.system(size: 13, weight: .medium)).foregroundColor(Color(hex: "8C9DB5"))
                         }
                     }
 
-                ForEach(Array(vm.modelBreakdown.prefix(5).enumerated()), id: \.element.model) { i, m in
+                ForEach(Array(vm.cachedModelBreakdown.prefix(5).enumerated()), id: \.element.model) { i, m in
                     VStack(spacing: 6) {
                         HStack {
                             Circle().fill(modelColors[i % modelColors.count]).frame(width: 10, height: 10)
@@ -354,8 +364,8 @@ struct DashboardView: View {
     // ═══════════════════════════════
 
     private var ioChart: some View {
-        let totalIn  = vm.ioByDay.map(\.input).reduce(0, +)
-        let totalOut = vm.ioByDay.map(\.output).reduce(0, +)
+        let totalIn  = vm.cachedIOByDay.map(\.input).reduce(0, +)
+        let totalOut = vm.cachedIOByDay.map(\.output).reduce(0, +)
         let totalAll = totalIn + totalOut
 
         return panel("Token 流量", nil) {
@@ -365,7 +375,7 @@ struct DashboardView: View {
                 FlowBlock(label: "合计", value: fmtTok(totalAll), color: .white)
             }
 
-            Chart(vm.ioByDay) { pair in
+            Chart(vm.cachedIOByDay) { pair in
                 AreaMark(x: .value("", pair.shortDate), y: .value("输出", pair.output))
                     .foregroundStyle(LinearGradient(colors: [Color(hex: "7C5CFC").opacity(0.45), .clear], startPoint: .top, endPoint: .bottom))
                 LineMark(x: .value("", pair.shortDate), y: .value("输出", pair.output))
@@ -396,7 +406,7 @@ struct DashboardView: View {
     // ═══════════════════════════════
 
     private var costChart: some View {
-        let costs = vm.costByDay
+        let costs = vm.cachedCostByDay
         let total = costs.map(\.cost).reduce(0, +)
         let avg   = costs.isEmpty ? 0 : total / Double(costs.count)
         let peak  = costs.map(\.cost).max() ?? 0
@@ -424,14 +434,14 @@ struct DashboardView: View {
             .frame(height: 210)
 
             // 模型费用明细列表
-            if !vm.costModelBreakdown.isEmpty {
+            if !vm.cachedModelCostBreakdown.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("模型费用明细")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(Color(hex: "A0B0CC"))
                         .padding(.top, 16)
 
-                    ForEach(Array(vm.costModelBreakdown.prefix(5))) { detail in
+                    ForEach(Array(vm.cachedModelCostBreakdown.prefix(5))) { detail in
                         ModelCostRow(
                             detail: detail,
                             isExpanded: expandedModels.contains(detail.model)
@@ -455,7 +465,7 @@ struct DashboardView: View {
     // ═══════════════════════════════
 
     private var costChartUSD: some View {
-        let costs = vm.costByDayUSD
+        let costs = vm.cachedCostByDayUSD
         let total = costs.map(\.cost).reduce(0, +)
         let avg   = costs.isEmpty ? 0 : total / Double(costs.count)
         let peak  = costs.map(\.cost).max() ?? 0
@@ -490,7 +500,7 @@ struct DashboardView: View {
     
     private var modelCharts: some View {
         VStack(spacing: 24) {
-            ForEach(Array(vm.modelCharts.enumerated()), id: \.element.id) { index, mc in
+            ForEach(Array(vm.cachedModelCharts.enumerated()), id: \.element.id) { index, mc in
                 let color = modelColors[index % modelColors.count]
                 
                 // 模型标题 + 总计
@@ -656,6 +666,13 @@ struct KpiChip: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(color.opacity(0.08))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.15), lineWidth: 1)))
     }
+}
+
+// MARK: - 统计项标识
+
+struct StatItem: Identifiable {
+    let id: String
+    let title: String; let value: String; let icon: String; let color: Color
 }
 
 struct NeonDonut: View {
