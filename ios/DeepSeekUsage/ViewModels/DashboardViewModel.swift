@@ -304,11 +304,13 @@ final class DashboardViewModel: ObservableObject {
                 for u in (m.usage ?? []) {
                     let t = u.type ?? ""; let amt = Int(u.amount ?? "0") ?? 0
                     if t == "REQUEST" {
-                        if reqMap[name] == nil { reqMap[name] = [:] }
-                        reqMap[name]?[dd] = (reqMap[name]?[dd] ?? 0) + amt
+                        var inner = reqMap[name, default: [:]]
+                        inner[dd] = (inner[dd] ?? 0) + amt
+                        reqMap[name] = inner
                     } else {
-                        if tokMap[name] == nil { tokMap[name] = [:] }
-                        tokMap[name]?[dd] = (tokMap[name]?[dd] ?? 0) + amt
+                        var inner = tokMap[name, default: [:]]
+                        inner[dd] = (inner[dd] ?? 0) + amt
+                        tokMap[name] = inner
                     }
                 }
             }
