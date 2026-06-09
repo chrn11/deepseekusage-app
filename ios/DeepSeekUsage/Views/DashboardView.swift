@@ -399,7 +399,10 @@ struct DashboardView: View {
                 AxisMarks(values: .stride(by: .day, count: 5)) { AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11)) }
             }
             .chartYAxis {
-                AxisMarks { AxisGridLine().foregroundStyle(.white.opacity(0.04)) }
+                AxisMarks {
+                    AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11))
+                    AxisGridLine().foregroundStyle(.white.opacity(0.04))
+                }
             }
             .chartPlotStyle { $0.background(Color.clear) }
             .frame(height: 190)
@@ -591,81 +594,14 @@ struct DashboardView: View {
     // ═══════════════════════════════
 
     private var requestCharts: some View {
-        let allDays = vm.requestsByModelAndDay.flatMap { $0.days }
-        let totalReqs = allDays.map(\.value).reduce(0, +)
-        let peakReq = allDays.map(\.value).max() ?? 0
-        let avgReq = allDays.isEmpty ? 0 : Double(totalReqs) / Double(allDays.map(\.date).count)
-
-        return panel("每日请求", "共 \(fmtTok(totalReqs)) 次") {
-            HStack(spacing: 12) {
-                KpiChip(title: "总计", value: "\(fmtTok(totalReqs))次", color: Color(hex: "00C6FF"))
-                KpiChip(title: "峰值", value: "\(fmtTok(peakReq))次", color: Color(hex: "FFD93D"))
-                KpiChip(title: "日均", value: String(format: "%.0f次", avgReq), color: Color(hex: "00E6A0"))
-            }
-
-            ForEach(Array(vm.requestsByModelAndDay.enumerated()), id: \.element.id) { index, md in
-                let color = modelColors[index % modelColors.count]
-                let avg = md.days.isEmpty ? 0 : Double(md.total) / Double(md.days.count)
-
-                VStack(spacing: 8) {
-                    HStack {
-                        Circle().fill(color).frame(width: 10, height: 10)
-                        Text(md.model).font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
-                        Spacer()
-                        Text("\(fmtTok(md.total))次").font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundColor(color)
-                    }
-
-                    if let sel = selectedRequestDay, sel.model == md.model {
-                        chartBubble(date: sel.day.shortDate, value: "\(fmtTok(sel.day.value))次")
-                    }
-
-                    Chart(md.days) { day in
-                        AreaMark(x: .value("", day.shortDate), y: .value("", day.value))
-                            .foregroundStyle(LinearGradient(colors: [color.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
-                        LineMark(x: .value("", day.shortDate), y: .value("", day.value))
-                            .foregroundStyle(color).lineStyle(StrokeStyle(lineWidth: 2))
-                        PointMark(x: .value("", day.shortDate), y: .value("", day.value))
-                            .foregroundStyle(color).symbolSize(selectedRequestDay?.model == md.model ? 40 : 20)
-                        RuleMark(y: .value("均值", avg))
-                            .foregroundStyle(Color(hex: "FFD93D").opacity(0.4))
-                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    }
-                    .chartXAxis {
-                        AxisMarks(values: .stride(by: .day, count: 5)) {
-                            AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11))
-                        }
-                    }
-                    .chartYAxis {
-                        AxisMarks {
-                            AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11))
-                            AxisGridLine().foregroundStyle(.white.opacity(0.04))
-                        }
-                    }
-                    .chartPlotStyle { $0.background(Color.clear) }
-                    .frame(height: 150)
-                    .chartOverlay { proxy in
-                        GeometryReader { geo in
-                            Rectangle().fill(.clear).contentShape(Rectangle())
-                                .gesture(DragGesture(minimumDistance: 0)
-                                    .onChanged { v in
-                                        let x = v.location.x - geo[proxy.plotAreaFrame].origin.x
-                                        guard let date: String = proxy.value(atX: x) else { return }
-                                        if let day = md.days.first(where: { $0.date == date }) {
-                                            selectedRequestDay = (model: md.model, day: day)
-                                        }
-                                    }
-                                    .onEnded { _ in selectedRequestDay = nil })
-                        }
-                    }
-                }
-                .padding(16)
-                .background(
-                    RoundedRectangle(cornerRadius: 20)
-                        .fill(Color(hex: "0A1228").opacity(0.55))
-                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.12), lineWidth: 1))
-                )
-            }
-        }
+        modelDayChart(
+            title: "每日请求",
+            data: vm.requestsByModelAndDay,
+            selection: $selectedRequestDay,
+            kpiColor: Color(hex: "00C6FF"),
+            formatValue: { "\(fmtTok($0))次" },
+            formatAvg: { String(format: "%.0f次", $0) }
+        )
     }
 
     // ═══════════════════════════════
@@ -673,19 +609,41 @@ struct DashboardView: View {
     // ═══════════════════════════════
 
     private var tokenCharts: some View {
-        let allDays = vm.tokensByModelAndDay.flatMap { $0.days }
-        let totalToks = allDays.map(\.value).reduce(0, +)
-        let peakTok = allDays.map(\.value).max() ?? 0
-        let avgTok = allDays.isEmpty ? 0 : Double(totalToks) / Double(allDays.map(\.date).count)
+        modelDayChart(
+            title: "每日 Token",
+            data: vm.tokensByModelAndDay,
+            selection: $selectedTokenDay,
+            kpiColor: Color(hex: "7C5CFC"),
+            formatValue: { fmtTok($0) },
+            formatAvg: { fmtTok(Int($0)) }
+        )
+    }
 
-        return panel("每日 Token", "共 \(fmtTok(totalToks))") {
+    // ═══════════════════════════════
+    // 模型日图表（共用）
+    // ═══════════════════════════════
+
+    private func modelDayChart(
+        title: String,
+        data: [ModelDayData],
+        selection: Binding<(model: String, day: DayValue)?>,
+        kpiColor: Color,
+        formatValue: @escaping (Int) -> String,
+        formatAvg: @escaping (Double) -> String
+    ) -> some View {
+        let allDays = data.flatMap { $0.days }
+        let total = allDays.map(\.value).reduce(0, +)
+        let peak = allDays.map(\.value).max() ?? 0
+        let avg = allDays.isEmpty ? 0 : Double(total) / Double(allDays.map(\.date).count)
+
+        return panel(title, "共 \(formatValue(total))") {
             HStack(spacing: 12) {
-                KpiChip(title: "总计", value: fmtTok(totalToks), color: Color(hex: "7C5CFC"))
-                KpiChip(title: "峰值", value: fmtTok(peakTok), color: Color(hex: "FFD93D"))
-                KpiChip(title: "日均", value: fmtTok(Int(avgTok)), color: Color(hex: "00E6A0"))
+                KpiChip(title: "总计", value: formatValue(total), color: kpiColor)
+                KpiChip(title: "峰值", value: formatValue(peak), color: Color(hex: "FFD93D"))
+                KpiChip(title: "日均", value: formatAvg(avg), color: Color(hex: "00E6A0"))
             }
 
-            ForEach(Array(vm.tokensByModelAndDay.enumerated()), id: \.element.id) { index, md in
+            ForEach(Array(data.enumerated()), id: \.element.id) { index, md in
                 let color = modelColors[index % modelColors.count]
                 let avg = md.days.isEmpty ? 0 : Double(md.total) / Double(md.days.count)
 
@@ -694,11 +652,11 @@ struct DashboardView: View {
                         Circle().fill(color).frame(width: 10, height: 10)
                         Text(md.model).font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
                         Spacer()
-                        Text(fmtTok(md.total)).font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundColor(color)
+                        Text(formatValue(md.total)).font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundColor(color)
                     }
 
-                    if let sel = selectedTokenDay, sel.model == md.model {
-                        chartBubble(date: sel.day.shortDate, value: fmtTok(sel.day.value))
+                    if let sel = selection.wrappedValue, sel.model == md.model {
+                        chartBubble(date: sel.day.shortDate, value: formatValue(sel.day.value))
                     }
 
                     Chart(md.days) { day in
@@ -707,7 +665,7 @@ struct DashboardView: View {
                         LineMark(x: .value("", day.shortDate), y: .value("", day.value))
                             .foregroundStyle(color).lineStyle(StrokeStyle(lineWidth: 2))
                         PointMark(x: .value("", day.shortDate), y: .value("", day.value))
-                            .foregroundStyle(color).symbolSize(selectedTokenDay?.model == md.model ? 40 : 20)
+                            .foregroundStyle(color).symbolSize(selection.wrappedValue?.model == md.model ? 40 : 20)
                         RuleMark(y: .value("均值", avg))
                             .foregroundStyle(Color(hex: "FFD93D").opacity(0.4))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
@@ -733,10 +691,10 @@ struct DashboardView: View {
                                         let x = v.location.x - geo[proxy.plotAreaFrame].origin.x
                                         guard let date: String = proxy.value(atX: x) else { return }
                                         if let day = md.days.first(where: { $0.date == date }) {
-                                            selectedTokenDay = (model: md.model, day: day)
+                                            selection.wrappedValue = (model: md.model, day: day)
                                         }
                                     }
-                                    .onEnded { _ in selectedTokenDay = nil })
+                                    .onEnded { _ in selection.wrappedValue = nil })
                         }
                     }
                 }
