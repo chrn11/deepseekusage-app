@@ -9,6 +9,11 @@ struct DashboardView: View {
     @State private var showRecharge = false
     @State private var showLoginSheet = false
     @State private var expandedModels: Set<String> = []
+    @State private var selectedCost: DailyCost?    // 费用图选中点
+    @State private var selectedCostUSD: DailyCost? // USD 费用图选中点
+    @State private var selectedIO: IOPair?         // I/O 图选中点
+    @State private var selectedRequestDay: (model: String, day: DayValue)?  // 请求图选中点
+    @State private var selectedTokenDay: (model: String, day: DayValue)?   // Token 图选中点
 
     var body: some View {
         NavigationStack {
@@ -24,7 +29,8 @@ struct DashboardView: View {
                     if !vm.cachedIOByDay.isEmpty      { ioChart }
                     if !vm.cachedCostByDay.isEmpty { costChart }
                     if !vm.cachedCostByDayUSD.isEmpty { costChartUSD }
-                    if !vm.cachedModelCharts.isEmpty { modelCharts }
+                    if !vm.requestsByModelAndDay.isEmpty { requestCharts }
+                    if !vm.tokensByModelAndDay.isEmpty { tokenCharts }
                     if !vm.isLoggedIn { loginBanner }
                 }
                 .padding(.horizontal, 16)
@@ -375,6 +381,10 @@ struct DashboardView: View {
                 FlowBlock(label: "合计", value: fmtTok(totalAll), color: .white)
             }
 
+            if let sel = selectedIO {
+                chartBubble(date: sel.shortDate, value: "入\(fmtTok(sel.input)) 出\(fmtTok(sel.output))")
+            }
+
             Chart(vm.cachedIOByDay) { pair in
                 AreaMark(x: .value("", pair.shortDate), y: .value("输出", pair.output))
                     .foregroundStyle(LinearGradient(colors: [Color(hex: "7C5CFC").opacity(0.45), .clear], startPoint: .top, endPoint: .bottom))
@@ -393,12 +403,36 @@ struct DashboardView: View {
             }
             .chartPlotStyle { $0.background(Color.clear) }
             .frame(height: 190)
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 0)
+                            .onChanged { v in
+                                let x = v.location.x - geo[proxy.plotAreaFrame].origin.x
+                                guard let date: String = proxy.value(atX: x) else { return }
+                                selectedIO = vm.cachedIOByDay.first(where: { $0.date == date })
+                            }
+                            .onEnded { _ in selectedIO = nil })
+                }
+            }
         }
     }
 
     private func fmtTok(_ n: Int) -> String {
         n >= 1_000_000 ? String(format: "%.1fM", Double(n)/1_000_000) :
         n >= 1_000     ? String(format: "%.0fK", Double(n)/1_000) : "\(n)"
+    }
+
+    // 触摸气泡
+    private func chartBubble(date: String, value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(date).font(.system(size: 12, weight: .medium)).foregroundColor(.white.opacity(0.8))
+            Text(value).font(.system(size: 12, weight: .bold)).foregroundColor(.white)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Color(hex: "1A2332"))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.1), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     // ═══════════════════════════════
@@ -411,7 +445,17 @@ struct DashboardView: View {
         let avg   = costs.isEmpty ? 0 : total / Double(costs.count)
         let peak  = costs.map(\.cost).max() ?? 0
 
-        return panel("消费金额", "月合计 ¥\(String(format: "%.2f", total))") {
+        return panel("每日费用", "月合计 ¥\(String(format: "%.2f", total))") {
+            HStack(spacing: 12) {
+                KpiChip(title: "总计", value: String(format: "¥%.2f", total), color: Color(hex: "00E6A0"))
+                KpiChip(title: "峰值", value: String(format: "¥%.2f", peak), color: Color(hex: "FFD93D"))
+                KpiChip(title: "日均", value: String(format: "¥%.2f", avg),  color: Color(hex: "00C6FF"))
+            }
+
+            if let sel = selectedCost {
+                chartBubble(date: sel.formattedDate, value: sel.formattedCostCNY)
+            }
+
             Chart(costs) { item in
                 AreaMark(x: .value("", item.formattedDate), y: .value("", item.cost))
                     .foregroundStyle(LinearGradient(colors: [Color(hex: "00E6A0").opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
@@ -419,19 +463,38 @@ struct DashboardView: View {
                     .foregroundStyle(LinearGradient(colors: [Color(hex: "00E6A0"), Color(hex: "00C6FF")], startPoint: .leading, endPoint: .trailing))
                     .lineStyle(StrokeStyle(lineWidth: 2.5))
                 PointMark(x: .value("", item.formattedDate), y: .value("", item.cost))
-                    .foregroundStyle(Color(hex: "00E6A0")).symbolSize(28)
+                    .foregroundStyle(Color(hex: "00E6A0")).symbolSize(selectedCost != nil ? 40 : 28)
+                RuleMark(y: .value("均值", avg))
+                    .foregroundStyle(Color(hex: "FFD93D").opacity(0.5))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                    .annotation(position: .top, alignment: .trailing) {
+                        Text("均值 ¥\(String(format: "%.2f", avg))").font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color(hex: "FFD93D"))
+                    }
             }
             .chartXAxis {
                 AxisMarks(values: .stride(by: .day, count: 5)) { AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11)) }
             }
             .chartYAxis {
-                AxisMarks { 
+                AxisMarks {
                     AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11))
-                    AxisGridLine().foregroundStyle(.white.opacity(0.04)) 
+                    AxisGridLine().foregroundStyle(.white.opacity(0.04))
                 }
             }
             .chartPlotStyle { $0.background(Color.clear) }
             .frame(height: 210)
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 0)
+                            .onChanged { v in
+                                let x = v.location.x - geo[proxy.plotAreaFrame].origin.x
+                                guard let date: String = proxy.value(atX: x) else { return }
+                                selectedCost = costs.first(where: { $0.date == date })
+                            }
+                            .onEnded { _ in selectedCost = nil })
+                }
+            }
 
             // 模型费用明细列表
             if !vm.cachedModelCostBreakdown.isEmpty {
@@ -470,7 +533,17 @@ struct DashboardView: View {
         let avg   = costs.isEmpty ? 0 : total / Double(costs.count)
         let peak  = costs.map(\.cost).max() ?? 0
 
-        return panel("消费金额 (USD)", "月合计 $\(String(format: "%.2f", total))") {
+        return panel("每日费用 (USD)", "月合计 $\(String(format: "%.2f", total))") {
+            HStack(spacing: 12) {
+                KpiChip(title: "总计", value: String(format: "$%.2f", total), color: Color(hex: "7C5CFC"))
+                KpiChip(title: "峰值", value: String(format: "$%.2f", peak), color: Color(hex: "FFD93D"))
+                KpiChip(title: "日均", value: String(format: "$%.2f", avg),  color: Color(hex: "00C6FF"))
+            }
+
+            if let sel = selectedCostUSD {
+                chartBubble(date: sel.formattedDate, value: sel.formattedCostUSD)
+            }
+
             Chart(costs) { item in
                 AreaMark(x: .value("", item.formattedDate), y: .value("", item.cost))
                     .foregroundStyle(LinearGradient(colors: [Color(hex: "7C5CFC").opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
@@ -478,103 +551,194 @@ struct DashboardView: View {
                     .foregroundStyle(LinearGradient(colors: [Color(hex: "7C5CFC"), Color(hex: "00C6FF")], startPoint: .leading, endPoint: .trailing))
                     .lineStyle(StrokeStyle(lineWidth: 2.5))
                 PointMark(x: .value("", item.formattedDate), y: .value("", item.cost))
-                    .foregroundStyle(Color(hex: "7C5CFC")).symbolSize(28)
+                    .foregroundStyle(Color(hex: "7C5CFC")).symbolSize(selectedCostUSD != nil ? 40 : 28)
+                RuleMark(y: .value("均值", avg))
+                    .foregroundStyle(Color(hex: "FFD93D").opacity(0.5))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                    .annotation(position: .top, alignment: .trailing) {
+                        Text("均值 $\(String(format: "%.2f", avg))").font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color(hex: "FFD93D"))
+                    }
             }
             .chartXAxis {
                 AxisMarks(values: .stride(by: .day, count: 5)) { AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11)) }
             }
             .chartYAxis {
-                AxisMarks { 
+                AxisMarks {
                     AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11))
-                    AxisGridLine().foregroundStyle(.white.opacity(0.04)) 
+                    AxisGridLine().foregroundStyle(.white.opacity(0.04))
                 }
             }
             .chartPlotStyle { $0.background(Color.clear) }
             .frame(height: 210)
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 0)
+                            .onChanged { v in
+                                let x = v.location.x - geo[proxy.plotAreaFrame].origin.x
+                                guard let date: String = proxy.value(atX: x) else { return }
+                                selectedCostUSD = costs.first(where: { $0.date == date })
+                            }
+                            .onEnded { _ in selectedCostUSD = nil })
+                }
+            }
         }
     }
     
     // ═══════════════════════════════
-    // 按模型分组图表（请求次数 + Token）
+    // 每日请求（按模型）
     // ═══════════════════════════════
-    
-    private var modelCharts: some View {
-        VStack(spacing: 24) {
-            ForEach(Array(vm.cachedModelCharts.enumerated()), id: \.element.id) { index, mc in
+
+    private var requestCharts: some View {
+        let allDays = vm.requestsByModelAndDay.flatMap { $0.days }
+        let totalReqs = allDays.map(\.value).reduce(0, +)
+        let peakReq = allDays.map(\.value).max() ?? 0
+        let avgReq = allDays.isEmpty ? 0 : Double(totalReqs) / Double(allDays.map(\.date).count)
+
+        return panel("每日请求", "共 \(fmtTok(totalReqs)) 次") {
+            HStack(spacing: 12) {
+                KpiChip(title: "总计", value: "\(fmtTok(totalReqs))次", color: Color(hex: "00C6FF"))
+                KpiChip(title: "峰值", value: "\(fmtTok(peakReq))次", color: Color(hex: "FFD93D"))
+                KpiChip(title: "日均", value: String(format: "%.0f次", avgReq), color: Color(hex: "00E6A0"))
+            }
+
+            ForEach(Array(vm.requestsByModelAndDay.enumerated()), id: \.element.id) { index, md in
                 let color = modelColors[index % modelColors.count]
-                
-                // 模型标题 + 总计
-                HStack {
-                    Text(mc.model)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.white)
-                    Spacer()
+                let avg = md.days.isEmpty ? 0 : Double(md.total) / Double(md.days.count)
+
+                VStack(spacing: 8) {
+                    HStack {
+                        Circle().fill(color).frame(width: 10, height: 10)
+                        Text(md.model).font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
+                        Spacer()
+                        Text("\(fmtTok(md.total))次").font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundColor(color)
+                    }
+
+                    if let sel = selectedRequestDay, sel.model == md.model {
+                        chartBubble(date: sel.day.shortDate, value: "\(fmtTok(sel.day.value))次")
+                    }
+
+                    Chart(md.days) { day in
+                        AreaMark(x: .value("", day.shortDate), y: .value("", day.value))
+                            .foregroundStyle(LinearGradient(colors: [color.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
+                        LineMark(x: .value("", day.shortDate), y: .value("", day.value))
+                            .foregroundStyle(color).lineStyle(StrokeStyle(lineWidth: 2))
+                        PointMark(x: .value("", day.shortDate), y: .value("", day.value))
+                            .foregroundStyle(color).symbolSize(selectedRequestDay?.model == md.model ? 40 : 20)
+                        RuleMark(y: .value("均值", avg))
+                            .foregroundStyle(Color(hex: "FFD93D").opacity(0.4))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .stride(by: .day, count: 5)) {
+                            AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11))
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks {
+                            AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11))
+                            AxisGridLine().foregroundStyle(.white.opacity(0.04))
+                        }
+                    }
+                    .chartPlotStyle { $0.background(Color.clear) }
+                    .frame(height: 150)
+                    .chartOverlay { proxy in
+                        GeometryReader { geo in
+                            Rectangle().fill(.clear).contentShape(Rectangle())
+                                .gesture(DragGesture(minimumDistance: 0)
+                                    .onChanged { v in
+                                        let x = v.location.x - geo[proxy.plotAreaFrame].origin.x
+                                        guard let date: String = proxy.value(atX: x) else { return }
+                                        if let day = md.days.first(where: { $0.date == date }) {
+                                            selectedRequestDay = (model: md.model, day: day)
+                                        }
+                                    }
+                                    .onEnded { _ in selectedRequestDay = nil })
+                        }
+                    }
                 }
-                
-                VStack(spacing: 16) {
-                    // API 请求次数
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color(hex: "0A1228").opacity(0.55))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.12), lineWidth: 1))
+                )
+            }
+        }
+    }
+
+    // ═══════════════════════════════
+    // 每日 Token（按模型）
+    // ═══════════════════════════════
+
+    private var tokenCharts: some View {
+        let allDays = vm.tokensByModelAndDay.flatMap { $0.days }
+        let totalToks = allDays.map(\.value).reduce(0, +)
+        let peakTok = allDays.map(\.value).max() ?? 0
+        let avgTok = allDays.isEmpty ? 0 : Double(totalToks) / Double(allDays.map(\.date).count)
+
+        return panel("每日 Token", "共 \(fmtTok(totalToks))") {
+            HStack(spacing: 12) {
+                KpiChip(title: "总计", value: fmtTok(totalToks), color: Color(hex: "7C5CFC"))
+                KpiChip(title: "峰值", value: fmtTok(peakTok), color: Color(hex: "FFD93D"))
+                KpiChip(title: "日均", value: fmtTok(Int(avgTok)), color: Color(hex: "00E6A0"))
+            }
+
+            ForEach(Array(vm.tokensByModelAndDay.enumerated()), id: \.element.id) { index, md in
+                let color = modelColors[index % modelColors.count]
+                let avg = md.days.isEmpty ? 0 : Double(md.total) / Double(md.days.count)
+
+                VStack(spacing: 8) {
                     HStack {
-                        Text("API 请求次数")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
+                        Circle().fill(color).frame(width: 10, height: 10)
+                        Text(md.model).font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
                         Spacer()
-                        Text("\(fmtTok(mc.totalRequests))")
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                            .foregroundColor(color)
+                        Text(fmtTok(md.total)).font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundColor(color)
                     }
-                    
-                    Chart(mc.requestDays) { day in
+
+                    if let sel = selectedTokenDay, sel.model == md.model {
+                        chartBubble(date: sel.day.shortDate, value: fmtTok(sel.day.value))
+                    }
+
+                    Chart(md.days) { day in
                         AreaMark(x: .value("", day.shortDate), y: .value("", day.value))
                             .foregroundStyle(LinearGradient(colors: [color.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
                         LineMark(x: .value("", day.shortDate), y: .value("", day.value))
-                            .foregroundStyle(color)
-                            .lineStyle(StrokeStyle(lineWidth: 2))
+                            .foregroundStyle(color).lineStyle(StrokeStyle(lineWidth: 2))
+                        PointMark(x: .value("", day.shortDate), y: .value("", day.value))
+                            .foregroundStyle(color).symbolSize(selectedTokenDay?.model == md.model ? 40 : 20)
+                        RuleMark(y: .value("均值", avg))
+                            .foregroundStyle(Color(hex: "FFD93D").opacity(0.4))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                     }
                     .chartXAxis {
-                        AxisMarks(values: .stride(by: .day, count: 5)) { 
-                            AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11)) 
+                        AxisMarks(values: .stride(by: .day, count: 5)) {
+                            AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11))
                         }
                     }
                     .chartYAxis {
-                        AxisMarks { 
+                        AxisMarks {
                             AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11))
-                            AxisGridLine().foregroundStyle(.white.opacity(0.04)) 
+                            AxisGridLine().foregroundStyle(.white.opacity(0.04))
                         }
                     }
                     .chartPlotStyle { $0.background(Color.clear) }
-                    .frame(height: 140)
-                    
-                    // Token
-                    HStack {
-                        Text("Tokens")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                        Spacer()
-                        Text("\(fmtTok(mc.totalTokens))")
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                            .foregroundColor(color)
-                    }
-                    
-                    Chart(mc.tokenDays) { day in
-                        AreaMark(x: .value("", day.shortDate), y: .value("", day.value))
-                            .foregroundStyle(LinearGradient(colors: [color.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
-                        LineMark(x: .value("", day.shortDate), y: .value("", day.value))
-                            .foregroundStyle(color)
-                            .lineStyle(StrokeStyle(lineWidth: 2))
-                    }
-                    .chartXAxis {
-                        AxisMarks(values: .stride(by: .day, count: 5)) { 
-                            AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11)) 
+                    .frame(height: 150)
+                    .chartOverlay { proxy in
+                        GeometryReader { geo in
+                            Rectangle().fill(.clear).contentShape(Rectangle())
+                                .gesture(DragGesture(minimumDistance: 0)
+                                    .onChanged { v in
+                                        let x = v.location.x - geo[proxy.plotAreaFrame].origin.x
+                                        guard let date: String = proxy.value(atX: x) else { return }
+                                        if let day = md.days.first(where: { $0.date == date }) {
+                                            selectedTokenDay = (model: md.model, day: day)
+                                        }
+                                    }
+                                    .onEnded { _ in selectedTokenDay = nil })
                         }
                     }
-                    .chartYAxis {
-                        AxisMarks { 
-                            AxisValueLabel().foregroundStyle(Color(hex: "8C9DB5")).font(.system(size: 11))
-                            AxisGridLine().foregroundStyle(.white.opacity(0.04)) 
-                        }
-                    }
-                    .chartPlotStyle { $0.background(Color.clear) }
-                    .frame(height: 140)
                 }
                 .padding(16)
                 .background(

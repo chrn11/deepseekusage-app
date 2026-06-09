@@ -37,7 +37,8 @@ final class DashboardViewModel: ObservableObject {
     @Published var cachedCostByDayUSD: [DailyCost] = []
     @Published var cachedModelBreakdown: [ModelShare] = []
     @Published var cachedIOByDay: [IOPair] = []
-    @Published var cachedModelCharts: [ModelChartData] = []
+    @Published var requestsByModelAndDay: [ModelDayData] = []
+    @Published var tokensByModelAndDay: [ModelDayData] = []
     @Published var cachedModelCostBreakdown: [ModelCostDetail] = []
 
     // MARK: - 余额预警
@@ -228,7 +229,8 @@ final class DashboardViewModel: ObservableObject {
         cachedCostByDayUSD = computeCostByDayUSD()
         cachedModelBreakdown = computeModelBreakdown()
         cachedIOByDay = computeIOByDay()
-        cachedModelCharts = computeModelCharts()
+        requestsByModelAndDay = computeRequestsByModelAndDay()
+        tokensByModelAndDay = computeTokensByModelAndDay()
         cachedModelCostBreakdown = computeModelCostBreakdown()
     }
 
@@ -295,32 +297,46 @@ final class DashboardViewModel: ObservableObject {
         }.sorted { $0.totalCost > $1.totalCost } ?? []
     }
 
-    private func computeModelCharts() -> [ModelChartData] {
-        var reqMap: [String: [String: Int]] = [:]; var tokMap: [String: [String: Int]] = [:]
+    private func computeRequestsByModelAndDay() -> [ModelDayData] {
+        var modelData: [String: [String: Int]] = [:]
         for day in allAmounts {
             guard let dd = day.date, let models = day.data else { continue }
             for m in models {
                 guard let name = m.model else { continue }
                 for u in (m.usage ?? []) {
-                    let t = u.type ?? ""; let amt = Int(u.amount ?? "0") ?? 0
-                    if t == "REQUEST" {
-                        var inner = reqMap[name, default: [:]]
-                        inner[dd] = (inner[dd] ?? 0) + amt
-                        reqMap[name] = inner
-                    } else {
-                        var inner = tokMap[name, default: [:]]
-                        inner[dd] = (inner[dd] ?? 0) + amt
-                        tokMap[name] = inner
-                    }
+                    guard (u.type ?? "") == "REQUEST" else { continue }
+                    let count = Int(u.amount ?? "0") ?? 0
+                    var inner = modelData[name] ?? [:]
+                    inner[dd] = (inner[dd] ?? 0) + count
+                    modelData[name] = inner
                 }
             }
         }
-        let allModels = Set(reqMap.keys).union(tokMap.keys)
-        return allModels.map { model in
-            let req = (reqMap[model] ?? [:]).sorted(by: <).map { DayValue(date: $0.key, value: $0.value) }
-            let tok = (tokMap[model] ?? [:]).sorted(by: <).map { DayValue(date: $0.key, value: $0.value) }
-            return ModelChartData(model: model, requestDays: req, tokenDays: tok)
-        }.sorted { $0.totalTokens > $1.totalTokens }.prefix(5).map { $0 }
+        return modelData.map { ModelDayData(model: $0.key, days: $0.value.sorted(by: <).map { DayValue(date: $0.key, value: $0.value) }) }
+            .sorted { $0.total > $1.total }
+            .prefix(5)
+            .map { $0 }
+    }
+
+    private func computeTokensByModelAndDay() -> [ModelDayData] {
+        var modelData: [String: [String: Int]] = [:]
+        for day in allAmounts {
+            guard let dd = day.date, let models = day.data else { continue }
+            for m in models {
+                guard let name = m.model else { continue }
+                for u in (m.usage ?? []) {
+                    guard (u.type ?? "") != "REQUEST" else { continue }
+                    let count = Int(u.amount ?? "0") ?? 0
+                    var inner = modelData[name] ?? [:]
+                    inner[dd] = (inner[dd] ?? 0) + count
+                    modelData[name] = inner
+                }
+            }
+        }
+        return modelData.map { ModelDayData(model: $0.key, days: $0.value.sorted(by: <).map { DayValue(date: $0.key, value: $0.value) }) }
+            .sorted { $0.total > $1.total }
+            .prefix(5)
+            .map { $0 }
     }
 
     // MARK: - fmt
@@ -393,16 +409,6 @@ struct ModelDayData: Identifiable {
     let model: String
     let days: [DayValue]
     var total: Int { days.map(\.value).reduce(0, +) }
-}
-
-/// 按模型聚合的请求+Token 图表数据
-struct ModelChartData: Identifiable {
-    let id = UUID()
-    let model: String
-    let requestDays: [DayValue]
-    let tokenDays: [DayValue]
-    var totalRequests: Int { requestDays.map(\.value).reduce(0, +) }
-    var totalTokens: Int { tokenDays.map(\.value).reduce(0, +) }
 }
 
 // MARK: - YearMonth
